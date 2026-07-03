@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>gokaf — Build Your Own Kafka Broker in Go — Master Plan</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #161923;
+    --panel-2: #1c202c;
+    --border: #2a2f3d;
+    --text: #e4e6eb;
+    --muted: #9aa1b1;
+    --accent: #7c9eff;
+    --track-a: #7c9eff;
+    --track-b: #4fd1c5;
+    --track-c: #f6ad55;
+    --track-d: #fc8181;
+    --track-e: #d6a4ff;
+    --code-bg: #0b0d12;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.55;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code, pre {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+  }
+  code { padding: 1px 6px; font-size: 0.9em; }
+  pre { padding: 14px 16px; overflow-x: auto; font-size: 0.85em; }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    min-height: 100vh;
+  }
+  nav.toc {
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+    padding: 24px 16px;
+    border-right: 1px solid var(--border);
+    background: var(--panel);
+  }
+  nav.toc h2 {
+    font-size: 0.75em;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    margin: 20px 0 8px;
+  }
+  nav.toc h2:first-child { margin-top: 0; }
+  nav.toc ul { list-style: none; margin: 0; padding: 0; }
+  nav.toc li a {
+    display: block;
+    padding: 4px 8px;
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 0.88em;
+  }
+  nav.toc li a:hover { background: var(--panel-2); text-decoration: none; }
+
+  main { padding: 40px 48px 100px; max-width: 980px; }
+
+  header.hero { margin-bottom: 36px; }
+  header.hero h1 { font-size: 1.9em; margin: 0 0 8px; }
+  header.hero p.subtitle { color: var(--muted); font-size: 1.05em; margin: 0; }
+
+  .callout {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--accent);
+    border-radius: 8px;
+    padding: 16px 18px;
+    margin: 18px 0;
+  }
+  .callout.warn { border-left-color: var(--track-d); }
+  .callout h4 { margin: 0 0 6px; font-size: 0.95em; }
+  .callout p:last-child { margin-bottom: 0; }
+
+  section.context { margin-bottom: 40px; }
+  section.context h2 { border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+
+  table.meta {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+    font-size: 0.92em;
+  }
+  table.meta th, table.meta td {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  table.meta th { color: var(--muted); width: 180px; font-weight: 600; }
+
+  .track {
+    margin: 48px 0 32px;
+    padding-top: 8px;
+  }
+  .track-header {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 6px;
+  }
+  .track-header h2 { margin: 0; font-size: 1.4em; }
+  .track-badge {
+    font-size: 0.72em;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .track-note { color: var(--muted); margin: 4px 0 20px; }
+
+  .trackA .track-badge { background: rgba(124,158,255,0.15); color: var(--track-a); }
+  .trackB .track-badge { background: rgba(79,209,197,0.15); color: var(--track-b); }
+  .trackC .track-badge { background: rgba(246,173,85,0.15); color: var(--track-c); }
+  .trackD .track-badge { background: rgba(252,129,129,0.15); color: var(--track-d); }
+  .trackE .track-badge { background: rgba(214,164,255,0.15); color: var(--track-e); }
+
+  .trackA .phase { border-left-color: var(--track-a); }
+  .trackB .phase { border-left-color: var(--track-b); }
+  .trackC .phase { border-left-color: var(--track-c); }
+  .trackD .phase { border-left-color: var(--track-d); }
+  .trackE .phase { border-left-color: var(--track-e); }
+
+  .phase {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--accent);
+    border-radius: 10px;
+    padding: 18px 22px;
+    margin: 16px 0;
+  }
+  .phase h3 {
+    margin: 0 0 12px;
+    font-size: 1.08em;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .phase-id {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.78em;
+    color: var(--muted);
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    padding: 2px 8px;
+    border-radius: 6px;
+  }
+  .phase dl { margin: 0; }
+  .phase dt {
+    font-size: 0.75em;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    margin-top: 12px;
+    font-weight: 600;
+  }
+  .phase dt:first-child { margin-top: 0; }
+  .phase dd { margin: 4px 0 0; }
+  .phase ul { margin: 4px 0 0; padding-left: 20px; }
+  .phase li { margin: 3px 0; }
+
+  .limitation {
+    margin-top: 12px;
+    padding: 10px 14px;
+    background: rgba(252,129,129,0.08);
+    border: 1px solid rgba(252,129,129,0.25);
+    border-radius: 8px;
+    font-size: 0.92em;
+  }
+  .limitation strong { color: var(--track-d); }
+
+  footer {
+    margin-top: 60px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 0.85em;
+  }
+
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: 1fr; }
+    nav.toc { position: relative; height: auto; }
+    main { padding: 24px; }
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+
+<nav class="toc">
+  <h2>Overview</h2>
+  <ul>
+    <li><a href="#context">Context &amp; decisions</a></li>
+    <li><a href="#repo-structure">Repo structure</a></li>
+    <li><a href="#testing-note">Testing approach</a></li>
+  </ul>
+
+  <h2>Track A — Protocol &amp; Core</h2>
+  <ul>
+    <li><a href="#phase-0">Phase 0 — TCP skeleton</a></li>
+    <li><a href="#phase-1">Phase 1 — Binary primitives</a></li>
+    <li><a href="#phase-2">Phase 2 — Request dispatch</a></li>
+    <li><a href="#phase-3">Phase 3 — ApiVersions</a></li>
+    <li><a href="#phase-4">Phase 4 — Metadata</a></li>
+    <li><a href="#phase-5">Phase 5 — CreateTopics</a></li>
+    <li><a href="#phase-6">Phase 6 — Storage engine</a></li>
+    <li><a href="#phase-7">Phase 7 — Produce API</a></li>
+    <li><a href="#phase-8">Phase 8 — Fetch API</a></li>
+    <li><a href="#phase-9">Phase 9 — Offset index</a></li>
+    <li><a href="#phase-10">Phase 10 — ListOffsets / multi-partition</a></li>
+  </ul>
+
+  <h2>Track B — Consumer Group</h2>
+  <ul>
+    <li><a href="#phase-11">Phase 11 — FindCoordinator</a></li>
+    <li><a href="#phase-12">Phase 12 — JoinGroup/SyncGroup</a></li>
+    <li><a href="#phase-13">Phase 13 — Heartbeat/LeaveGroup</a></li>
+    <li><a href="#phase-14">Phase 14 — Offset commit/fetch</a></li>
+    <li><a href="#phase-15">Phase 15 — Real assignors</a></li>
+  </ul>
+
+  <h2>Track C — Producer Reliability</h2>
+  <ul>
+    <li><a href="#phase-16">Phase 16 — Idempotent producer</a></li>
+  </ul>
+
+  <h2>Track D — Replication</h2>
+  <ul>
+    <li><a href="#phase-17">Phase 17 — Multi-broker bootstrap</a></li>
+    <li><a href="#phase-18">Phase 18 — Leader assignment</a></li>
+    <li><a href="#phase-19">Phase 19 — ReplicaFetcher</a></li>
+    <li><a href="#phase-20">Phase 20 — ISR / high-watermark</a></li>
+    <li><a href="#phase-21">Phase 21 — Simple failover</a></li>
+  </ul>
+
+  <h2>Track E — Controller</h2>
+  <ul>
+    <li><a href="#phase-22">Phase 22 — Controller election</a></li>
+    <li><a href="#phase-23">Phase 23 — Metadata log (KRaft-style)</a></li>
+  </ul>
+</nav>
+
+<main>
+
+  <header class="hero">
+    <h1>gokaf — Build Your Own Kafka Broker in Go</h1>
+    <p class="subtitle">Master plan: learn Go syntax and deep Kafka internals by re-implementing a Kafka-compatible broker from scratch — protocol, storage engine, consumer groups, replication, and a simplified controller.</p>
+  </header>
+
+  <section class="context" id="context">
+    <h2>Context &amp; decisions</h2>
+    <table class="meta">
+      <tr><th>Background</th><td>Coming from .NET / C#. Go syntax notes are called out per phase where the mental model differs meaningfully (error handling, interfaces, concurrency).</td></tr>
+      <tr><th>Scope</th><td>Full scope, including multi-broker replication and a simplified controller (Track D + E), not just a single-broker implementation.</td></tr>
+      <tr><th>Client library</th><td>None for the broker itself — this project <em>is</em> the broker. A hand-written test client is built in parallel (<code>cmd/testclient</code>) instead of using a library like <code>kafka-go</code> or <code>franz-go</code>.</td></tr>
+      <tr><th>Reference</th><td>Architecture inspiration only from <a href="https://deepwiki.com/KhaiHust/kaf-go/1-overview" target="_blank" rel="noopener">KhaiHust/kaf-go</a>. Implementation is written from the official <a href="https://kafka.apache.org/protocol.html" target="_blank" rel="noopener">Kafka Protocol Guide</a> and KIP-98 (RecordBatch v2), not copied from kaf-go.</td></tr>
+      <tr><th>Verification</th><td>Primary: hand-written test client. Recommended (not required) sanity check with a real client such as <code>kcat</code> at major milestones (end of Phase 8, end of Phase 15) to catch protocol drift early.</td></tr>
+    </table>
+
+    <div class="callout warn">
+      <h4>Honest scope warning</h4>
+      <p>Track D and Track E are substantially harder than Track A–C, both in code volume and in how hard distributed-systems bugs are to reproduce. Phase 23 explicitly does <strong>not</strong> implement real Raft consensus — it borrows the idea, not the safety guarantees. If real Raft is wanted later, treat it as its own project (start by reading <code>etcd/raft</code>), not bolted onto this one.</p>
+    </div>
+  </section>
+
+  <section class="context" id="repo-structure">
+    <h2>Repo structure</h2>
+<pre>gokaf/
+  cmd/
+    broker/         # main.go — runs one broker node
+    testclient/      # hand-written test client (no kafka-go/franz-go)
+  internal/
+    protocol/          # primitive encode/decode + request/response types
+    network/             # TCP server, connection handling, request dispatch
+    storage/               # segmented append-only log + index
+    topic/                   # topic/partition metadata registry
+    group/                     # consumer group coordinator state machine
+    producer/                    # PID manager, sequence dedup
+    replication/                   # ReplicaFetcher, ISR (Track D)
+    cluster/                         # controller election, metadata log (Track E)
+  docs/
+    master-plan.html                  # this file
+    protocol-notes.md                   # your own notes while reading the spec
+  go.mod</pre>
+  </section>
+
+  <section class="context" id="testing-note">
+    <h2>Testing approach</h2>
+    <p>Every phase's acceptance criteria is verified by a hand-written Go test client talking raw bytes over TCP to the broker — no client library. This is deliberate: writing both sides forces confronting the wire format directly, at the cost of a real risk that a bug in the client silently "matches" a bug in the server. Mitigate this by cross-checking with <code>kcat</code> against a real Kafka broker whenever a response looks suspiciously convenient.</p>
+  </section>
+
+  <!-- TRACK A -->
+  <div class="track trackA">
+    <div class="track-header">
+      <h2>Track A — Protocol &amp; Single-Broker Core</h2>
+      <span class="track-badge">Phases 0–10</span>
+    </div>
+    <p class="track-note">The foundation: wire protocol, storage engine, Produce/Fetch. Everything else builds on this.</p>
+
+    <div class="phase" id="phase-0">
+      <h3><span class="phase-id">Phase 0</span> TCP skeleton + spec reading</h3>
+      <dl>
+        <dt>Input</dt><dd>Go 1.22+. Read the Kafka Protocol Guide sections "Preliminaries" and "Wire Format" before writing code.</dd>
+        <dt>Output</dt><dd>A <code>net.Listener</code> on TCP port 9092. Each connection reads the 4-byte size prefix, reads that many bytes, and logs a hex dump. No parsing yet.</dd>
+        <dt>Acceptance criteria</dt><dd><code>nc -v localhost 9092</code> sends arbitrary bytes → broker logs the correct byte count and hex dump, no crash.</dd>
+        <dt>Go concepts</dt><ul>
+          <li><code>net.Listener</code> / <code>net.Conn</code></li>
+          <li>One goroutine per connection</li>
+          <li><code>io.ReadFull</code>, <code>encoding/hex</code></li>
+        </ul>
+        <dt>Kafka concepts</dt><ul><li>Size-prefixed framing underlies the entire protocol</li></ul>
+      </dl>
+    </div>
+
+    <div class="phase" id="phase-1">
+      <h3><span class="phase-id">Phase 1</span> Binary primitive encode/decode</h3>
+      <dl>
+        <dt>Input</dt><dd>TCP skeleton from Phase 0.</dd>
+        <dt>Output</dt><dd><code>internal/protocol/types.go</code> with read/write helpers for INT8/16/32/64, UNSIGNED_VARINT, VARINT (zigzag), STRING, COMPACT_STRING, NULLABLE_STRING, ARRAY, COMPACT_ARRAY, and TAG_BUFFER (minimal: a single <code>0x00</code> byte means "no tagged fields").</dd>
+        <dt>Acceptance criteria</dt><dd>Unit tests round-trip encode→decode for every type and match the worked byte examples in the protocol guide.</dd>
+        <dt>Go concepts</dt><ul>
+          <li><code>bytes.Buffer</code>, <code>encoding/binary.BigEndian</code></li>
+          <li>Custom <code>Decoder</code>/<code>Encoder</code> structs wrapping <code>io.Reader</code>/<code>io.Writer</code></li>
+        </ul>
+      </dl>
+    </div>
+
+    <div class="phase" id="phase-2">
+      <h3><span class="phase-id">Phase 2</span> Request header parsing + dispatch skeleton</h3>
+      <dl>
+        <dt>Input</dt><dd>Primitive encode/decode from Phase 1.</dd>
+        <dt>Output</dt><dd>Parse <code>RequestHeader</code> (api_key, api_version, correlation_id, client_id). A dispatch table (<code>map[int16]HandlerFunc</code>) routes by api_key; unimplemented handlers return a well-formed "unsupported API" error instead of crashing.</dd>
+        <dt>Acceptance criteria</dt><dd>Test client sends a request with an unknown api_key → broker replies with a correct <code>ResponseHeader{correlation_id}</code> + error code, no crash.</dd>
+        <dt>Go concepts</dt><ul><li>Dispatch table instead of a long switch statement — functions as values</li></ul>
+      </dl>
+    </div>
+
+    <div class="phase" id="phase-3">
+      <h3><span class="phase-id">Phase 3</span> ApiVersions (key=18)</h3>
+      <dl>
+        <dt>Output</dt><dd>Handler returns the list of API keys the broker supports with min/max version — the handshake every real client sends first.</dd>
+        <dt>Acceptance criteria</dt><dd>Test client sends ApiVersionsRequest → correctly parses the response.</dd>
+        <dt>Kafka concepts</dt><ul><li>Why ApiVersions is always the first request — the client needs to know which versions the server supports before sending anything else</li></ul>
+      </dl>
+    </div>
+
+    <div class="phase" id="phase-4">
+      <h3><span class="phase-id">Phase 4</span> Topic registry + Metadata (key=3)</h3>
+      <dl>
+        <dt>Output</dt><dd><code>internal/topic/registry.go</code> — a map of topics guarded by <code>sync.RWMutex</code>; Metadata handler returns cluster info (single broker = itself) plus the topic list (hardcode 1–2 test topics for now).</dd>
+        <dt>Acceptance criteria</dt><dd>MetadataRequest(topics=nil) returns the correct topic/partition/leader list.</dd>
+        <dt>Go concepts</dt><ul><li><code>sync.RWMutex</code> for read-heavy shared state</li></ul>
+      </dl>
+    </div>
+
+    <div class="phase" id="phase-5">
+      <h3><span class="phase-id">Phase 5</span> CreateTopics / DeleteTopics (key=19/20)</h3>
+      <dl>
+        <dt>Output</dt><dd>Handlers add/remove topics from the registry at runtime (no disk persistence yet).</dd>
+        <dt>Acceptance criteria</dt><dd>Create topic "orders" with 3 partitions → Metadata reflects it correctly.</dd>
+        <dt>Go concepts</dt><ul><li>Input validation using Go's return-error pattern</li></ul>
+      </dl>
+    </div>
+
+    <div class="phase" id="phase-6">
+      <h3><span class="phase-id">Phase 6</span> Storage engine — segmented log</h3>
+      <dl>
+        <dt>Output</dt><dd><code>internal/storage/log.go</code>. Each partition is a directory containing append-only segment files. <code>Append(records []byte) (baseOffset int64, err error)</code> and <code>Read(offset int64, maxBytes int) ([]byte, error)</code> (linear scan, no index yet).</dd>
+        <dt>Acceptance criteria</dt><dd>Append 1000 fake records, read back correctly at arbitrary offsets. Restart the process (close/reopen the file) → data survives.</dd>
+        <dt>Go concepts</dt><ul>
+          <li><code>os.OpenFile(O_APPEND)</code>, <code>bufio.Writer</code>, <code>io.Seeker</code></li>
+        </ul>
+        <dt>Kafka concepts</dt><ul><li>Why append-only sequential I/O beats random-write databases for this workload</li></ul>
+      </dl>
+    </div>
+
+    <div class="phase" id="phase-7">
+      <h3><span class="phase-id">Phase 7</span> Produce API (key=0)</h3>
+      <dl>
+        <dt>Output</dt><dd>Parse a v2 RecordBatch (batch header + varint-encoded records), validate the CRC32C, call <code>Log.Append</code>, return the assigned offset.</dd>
+        <dt>Acceptance criteria</dt><dd>Test client hand-encodes a valid RecordBatch → sends Produce → receives the correct base offset. Verify the on-disk bytes match the worked examples in KIP-98.</dd>
+        <dt>Kafka concepts</dt><ul><li>RecordBatch structure; why compression, transactions, and idempotency all live at the batch-header level</li></ul>
+      </dl>
+    </div>
+
+    <div class="phase" id="phase-8">
+      <h3><span class="phase-id">Phase 8</span> Fetch API (key=1)</h3>
+      <dl>
+        <dt>Output</dt><dd>Parse a FetchRequest → <code>Log.Read</code> → re-encode as a RecordBatch → return the response.</dd>
+        <dt>Acceptance criteria</dt><dd>Produce 10 messages → Fetch from offset 0 → receive all 10, correct order, correct content.</dd>
+        <div class="limitation"><strong>Known limitation:</strong> no long-poll (<code>fetch.max.wait.ms</code>) yet — returns empty immediately if there's no data. Upgrade later if desired.</div>
+      </dl>
+    </div>
+
+    <div class="phase" id="phase-9">
+      <h3><span class="phase-id">Phase 9</span> Offset index + segment rolling</h3>
+      <dl>
+        <dt>Output</dt><dd>A sparse <code>.index</code> file alongside each <code>.log</code> file (offset → byte position, one entry per N bytes), plus segment rolling once a size limit is reached.</dd>
+        <dt>Acceptance criteria</dt><dd>Generate enough data to produce 2+ segments; Fetch from a later segment returns correct data. Benchmark shows lookup is meaningfully faster than the Phase 6 linear scan.</dd>
+        <dt>Go concepts</dt><ul><li><code>sort.Search</code> (binary search), <code>go test -bench</code></li></ul>
+      </dl>
+    </div>
+
+    <div class="phase" id="phase-10">
+      <h3><span class="phase-id">Phase 10</span> ListOffsets (key=2) + full multi-partition support</h3>
+      <dl>
+        <dt>Output</dt><dd>Handler returns earliest/latest offset for a partition. Produce/Fetch work correctly when a topic has multiple partitions (each with its own <code>Log</code>).</dd>
+        <dt>Acceptance criteria</dt><dd>Test client uses ListOffsets to compute where to start fetching from, like a real consumer would, verified on a multi-partition topic.</dd>
+      </dl>
+    </div>
+  </div>
+
+  <!-- TRACK B -->
+  <div class="track trackB">
+    <div class="track-header">
+      <h2>Track B — Consumer Group</h2>
+      <span class="track-badge">Phases 11–15</span>
+    </div>
+    <p class="track-note">Group coordination protocol: how consumers discover each other, split partitions, and track progress.</p>
+
+    <div class="phase" id="phase-11">
+      <h3><span class="phase-id">Phase 11</span> FindCoordinator (key=10)</h3>
+      <dl>
+        <dt>Output</dt><dd>Single-broker setup, so the coordinator is always this broker. Returns broker info as coordinator for a given group_id.</dd>
+        <dt>Acceptance criteria</dt><dd>Correct broker info returned for any group_id.</dd>
+        <dt>Kafka concepts</dt><ul><li>What a coordinator is — the one broker responsible for a given consumer group's state</li></ul>
+      </dl>
+    </div>
+
+    <div class="phase" id="phase-12">
+      <h3><span class="phase-id">Phase 12</span> JoinGroup / SyncGroup (key=11/14) + state machine</h3>
+      <dl>
+        <dt>Output</dt><dd><code>internal/group/coordinator.go</code>: state machine (<code>Empty → PreparingRebalance → CompletingRebalance → Stable</code>). JoinGroup registers members and picks one as leader; SyncGroup distributes the leader's partition assignment to every member.</dd>
+        <dt>Acceptance criteria</dt><dd>2–3 simulated consumers in the same group → one is elected leader → SyncGroup assigns partitions with no overlap and no gaps.</dd>
+        <dt>Go concepts</dt><ul><li>State machine via <code>type GroupState int</code> + <code>iota</code> — Go has no sealed-class equivalent, unlike Kotlin</li></ul>
+      </dl>
+    </div>
+
+    <div class="phase" id="phase-13">
+      <h3><span class="phase-id">Phase 13</span> Heartbeat / LeaveGroup (key=12/13) + session timeout</h3>
+      <dl>
+        <dt>Output</dt><dd>Heartbeat resets a per-member timer. No heartbeat within <code>session.timeout.ms</code> → coordinator evicts the member and triggers a rebalance.</dd>
+        <dt>Acceptance criteria</dt><dd>Simulate one member crashing (stop sending heartbeats) → after the timeout, the coordinator rebalances and the remaining members pick up its partitions.</dd>
+        <dt>Go concepts</dt><ul><li><code>time.AfterFunc</code> per member — careful to <code>Stop()</code> the timer on departure to avoid goroutine leaks</li></ul>
+      </dl>
+    </div>
+
+    <div class="phase" id="phase-14">
+      <h3><span class="phase-id">Phase 14</span> OffsetCommit / OffsetFetch (key=8/9) + internal offsets log</h3>
+      <dl>
+        <dt>Output</dt><dd>Use the Phase 6 storage engine to create an internal <code>__consumer_offsets</code> topic. Commit writes a record (group_id + topic + partition → offset); OffsetFetch reads the latest state.</dd>
+        <dt>Acceptance criteria</dt><dd>Commit an offset, fully restart the broker (kill + start), OffsetFetch still returns the committed offset — persistence across restarts.</dd>
+        <dt>Kafka concepts</dt><ul><li>This is exactly how real Kafka stores offsets — an internal topic, not a separate database table</li></ul>
+      </dl>
+    </div>
+
+    <div class="phase" id="phase-15">
+      <h3><span class="phase-id">Phase 15</span> Real Range / RoundRobin assignors</h3>
+      <dl>
+        <dt>Output</dt><dd>Replace the placeholder assignment from Phase 12 with two real strategies (Range, RoundRobin), selectable via JoinGroup protocol metadata.</dd>
+        <dt>Acceptance criteria</dt><dd>Pure unit test of the assignor (no network): given N partitions and M members, output matches the worked examples in the Kafka docs.</dd>
+      </dl>
+    </div>
+  </div>
+
+  <!-- TRACK C -->
+  <div class="track trackC">
+    <div class="track-header">
+      <h2>Track C — Producer Reliability</h2>
+      <span class="track-badge">Phase 16</span>
+    </div>
+    <p class="track-note">Idempotency at the partition level — the real mechanism behind Kafka's exactly-once-per-partition guarantee.</p>
+
+    <div class="phase" id="phase-16">
+      <h3><span class="phase-id">Phase 16</span> InitProducerId (key=22) + idempotent producer</h3>
+      <dl>
+        <dt>Output</dt><dd>A PID manager assigns <code>producer_id</code>/<code>producer_epoch</code> per producer session. The broker tracks <code>(producer_id, partition) → last_sequence</code> to deduplicate — a repeated sequence number is silently dropped instead of re-appended.</dd>
+        <dt>Acceptance criteria</dt><dd>Test client deliberately resends the same batch twice (simulating a retry after a timeout) → the log contains exactly one copy, not two.</dd>
+        <dt>Kafka concepts</dt><ul><li>This is Kafka's real exactly-once-per-partition mechanism — no cross-partition transaction needed</li></ul>
+      </dl>
+    </div>
+  </div>
+
+  <!-- TRACK D -->
+  <div class="track trackD">
+    <div class="track-header">
+      <h2>Track D — Multi-Broker &amp; Replication</h2>
+      <span class="track-badge">Phases 17–21 · heavy</span>
+    </div>
+    <p class="track-note">This is where the project stops being "one process" and starts being a distributed system.</p>
+
+    <div class="phase" id="phase-17">
+      <h3><span class="phase-id">Phase 17</span> Multi-broker bootstrap</h3>
+      <dl>
+        <dt>Output</dt><dd>Run N broker instances (each with a broker_id and its own port), each aware of the others via static config (no service discovery yet). <code>internal/cluster/brokerclient.go</code> reuses the Track A protocol layer for inter-broker calls.</dd>
+        <dt>Acceptance criteria</dt><dd>3 brokers started together → each broker's Metadata response correctly lists all 3 (id, host, port).</dd>
+      </dl>
+    </div>
+
+    <div class="phase" id="phase-18">
+      <h3><span class="phase-id">Phase 18</span> Partition leader assignment across brokers</h3>
+      <dl>
+        <dt>Output</dt><dd>CreateTopics distributes each partition's leader round-robin across brokers instead of always the local broker. Metadata reflects the real leader per partition.</dd>
+        <dt>Acceptance criteria</dt><dd>Create a topic with 6 partitions on a 3-broker cluster → leaders are evenly spread, 2 partitions per broker.</dd>
+      </dl>
+    </div>
+
+    <div class="phase" id="phase-19">
+      <h3><span class="phase-id">Phase 19</span> ReplicaFetcher — follower replication</h3>
+      <dl>
+        <dt>Output</dt><dd>Any broker that isn't the leader for a partition runs a goroutine loop continuously fetching from the leader (via the existing Fetch API over <code>BrokerClient</code>) and appending to its own local log.</dd>
+        <dt>Acceptance criteria</dt><dd>Produce to the leader → within a few seconds, the follower brokers' log files have matching checksums.</dd>
+      </dl>
+    </div>
+
+    <div class="phase" id="phase-20">
+      <h3><span class="phase-id">Phase 20</span> ISR tracking + high-watermark + acks=all</h3>
+      <dl>
+        <dt>Output</dt><dd>The leader tracks which followers are "caught up" (the in-sync replica set). Produce(acks=all) only returns once enough ISR members have fetched up to that offset (the high-watermark).</dd>
+        <dt>Acceptance criteria</dt><dd>Simulate a slow follower (delay its fetch loop) → Produce(acks=all) blocks/waits correctly, while Produce(acks=1) returns immediately without waiting.</dd>
+        <dt>Kafka concepts</dt><ul><li>This is the core of Kafka's durability guarantee — understanding this phase is understanding roughly 80% of "real Kafka"</li></ul>
+      </dl>
+    </div>
+
+    <div class="phase" id="phase-21">
+      <h3><span class="phase-id">Phase 21</span> Simple leader failover</h3>
+      <dl>
+        <dt>Output</dt><dd>When the leader broker goes down (detected via inter-broker heartbeat), another broker in the ISR is promoted to leader. Metadata is updated for clients.</dd>
+        <dt>Acceptance criteria</dt><dd>Kill the leader process mid-Produce → the producer (following the NotLeaderForPartition error) switches to the new leader without losing any data that was already in the ISR at crash time.</dd>
+        <div class="limitation"><strong>Known limitation:</strong> this failover rule is simplified — "lowest broker ID still alive in the ISR wins" — not a real controller decision. Replaced by a real controller in Phase 22–23.</div>
+      </dl>
+    </div>
+  </div>
+
+  <!-- TRACK E -->
+  <div class="track trackE">
+    <div class="track-header">
+      <h2>Track E — Controller / Cluster Metadata</h2>
+      <span class="track-badge">Phases 22–23 · very advanced</span>
+    </div>
+    <p class="track-note">A deliberately simplified take on what KRaft does for real. Treat these two phases as "learn the shape of the idea," not "ship a production consensus system."</p>
+
+    <div class="phase" id="phase-22">
+      <h3><span class="phase-id">Phase 22</span> Controller election</h3>
+      <dl>
+        <dt>Output</dt><dd>One broker in the cluster is elected "controller" and becomes solely responsible for deciding partition leadership, replacing the ad-hoc rule from Phase 21. Simplified via a bully algorithm (highest broker ID still alive wins) instead of real Raft.</dd>
+        <dt>Acceptance criteria</dt><dd>Kill the current controller → the cluster elects exactly one new controller within a few seconds, with no split-brain, under the simplifying assumption that there's no network partition in the test.</dd>
+      </dl>
+    </div>
+
+    <div class="phase" id="phase-23">
+      <h3><span class="phase-id">Phase 23</span> KRaft-style metadata log (optional)</h3>
+      <dl>
+        <dt>Output</dt><dd>The controller writes every cluster change (topic create/delete, leader changes, broker join/leave) to its own append-only log (reusing the Track A storage engine). Other brokers replay this log to stay in sync — this is the core idea behind KRaft.</dd>
+        <dt>Acceptance criteria</dt><dd>Restart the entire cluster → every broker replays the log and ends up with identical metadata.</dd>
+        <div class="limitation"><strong>Known limitation:</strong> this does <em>not</em> implement real Raft consensus and does not guarantee safety under an actual network partition or split-brain scenario. It teaches the idea, not a production-safe implementation. Real Raft belongs in its own project — start by reading <code>etcd/raft</code>, don't build it from scratch bolted onto this broker.</div>
+      </dl>
+    </div>
+  </div>
+
+  <footer>
+    gokaf master plan — reference architecture: <a href="https://deepwiki.com/KhaiHust/kaf-go/1-overview" target="_blank" rel="noopener">KhaiHust/kaf-go</a> · protocol spec: <a href="https://kafka.apache.org/protocol.html" target="_blank" rel="noopener">Kafka Protocol Guide</a>
+  </footer>
+
+</main>
+</div>
+</body>
+</html>
