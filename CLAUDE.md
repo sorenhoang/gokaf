@@ -33,7 +33,7 @@ delegating it to Claude. Behave accordingly:
 
 ## Current status
 
-Not started. Next up: **Phase 0 — TCP skeleton + spec reading** (Track A).
+Phase 0 done. Next up: **Phase 1 — Binary primitive encode/decode** (Track A).
 
 Full checklist with acceptance criteria per phase: [PROGRESS.md](PROGRESS.md).
 Update both this line and the matching checkbox in PROGRESS.md as phases
