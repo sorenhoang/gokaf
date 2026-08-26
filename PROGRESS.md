@@ -10,7 +10,7 @@ not "done." Update this file as phases complete; keep `CLAUDE.md`'s
 - [x] **Phase 0** — TCP skeleton + spec reading
       AC: `nc -v localhost 9092` sends arbitrary bytes → broker logs the
       correct byte count and hex dump, no crash.
-- [ ] **Phase 1** — Binary primitive encode/decode
+- [x] **Phase 1** — Binary primitive encode/decode
       AC: Unit tests round-trip encode→decode for every type and match the
       worked byte examples in the protocol guide.
 - [ ] **Phase 2** — Request header parsing + dispatch skeleton

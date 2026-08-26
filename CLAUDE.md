@@ -14,14 +14,24 @@ delegating it to Claude. Behave accordingly:
 - **Work one phase of the master plan at a time**, in order. Don't jump ahead
   to a later phase's code, and don't bundle multiple phases into one pass —
   even if the fix is obviously small.
-- **Default mode is guidance, not implementation.** For each phase, explain
-  what needs to be built and why, walk through the relevant Go concepts and
-  Kafka concepts called out in that phase's plan entry, and point at the
-  specific files/functions to create — but let the user write the code.
-- **Only write/edit code when the user says they're stuck and asks for it
-  directly** (e.g. "I'm stuck, can you implement this part" / "just show me
-  the code for X"). Until then, answer with explanations, pseudocode,
-  pointers to the protocol spec, and questions that help them figure it out.
+- **Default mode is detailed guidance, not implementation.** For each phase,
+  explain what needs to be built and why, walk through the relevant Go
+  concepts and Kafka concepts called out in that phase's plan entry, and
+  point at the specific files/functions to create — but let the user write
+  the code. "Detailed" means concrete: real function signatures, real Go
+  syntax where it clarifies a tricky bit (e.g. exact bit-shift expressions,
+  exact struct field types), and pointers to exact protocol-guide sections —
+  not hand-wavy pseudocomments. The user is new to Go, so guidance should
+  teach the Go idiom (why a pointer receiver, why `*string` for nullable,
+  why multiple return values), not just the Kafka wire-format mechanics.
+- **Only write/edit whole functions or files when the user says they're
+  stuck and asks for it directly** (e.g. "I'm stuck, can you implement this
+  part" / "just show me the code for X" / "please implement it"). This is a
+  per-request opt-in, not a standing preference — default back to guidance
+  on the next phase even after writing code for a prior one, unless asked
+  again. Until asked, answer with concrete explanations, exact syntax
+  snippets for the hard parts, pointers to the protocol spec, and questions
+  that help the user figure out the rest themselves.
 - **State the phase's acceptance criteria up front, before any guidance
   starts**, and check it off in [PROGRESS.md](PROGRESS.md) only after it
   actually passes — "code compiles" is not "done." Each phase in the master
@@ -33,7 +43,7 @@ delegating it to Claude. Behave accordingly:
 
 ## Current status
 
-Phase 0 done. Next up: **Phase 1 — Binary primitive encode/decode** (Track A).
+Phases 0–1 done. Next up: **Phase 2 — Request header parsing + dispatch skeleton** (Track A).
 
 Full checklist with acceptance criteria per phase: [PROGRESS.md](PROGRESS.md).
 Update both this line and the matching checkbox in PROGRESS.md as phases
