@@ -1,12 +1,12 @@
 package main
 
 import (
-	"encoding/binary"
-	"encoding/hex"
 	"errors"
 	"io"
 	"log"
 	"net"
+
+	"github.com/sorenhoang/gokaf/internal/network"
 )
 
 func main() {
@@ -32,21 +32,16 @@ func handleConnection(conn net.Conn) {
 	defer conn.Close()
 
 	for {
-		lengthBuf := make([]byte, 4)
-		if _, err := io.ReadFull(conn, lengthBuf); err != nil {
-			logReadErr(conn, "length prefix", err)
+		payload, err := network.ReadFrame(conn)
+		if err != nil {
+			logReadErr(conn, "frame", err)
 			return
 		}
 
-		length := binary.BigEndian.Uint32(lengthBuf)
-
-		payload := make([]byte, length)
-		if _, err := io.ReadFull(conn, payload); err != nil {
-			logReadErr(conn, "payload", err)
+		if err := network.Dispatch(conn, payload); err != nil {
+			log.Printf("dispatch error from %s: %v", conn.RemoteAddr(), err)
 			return
 		}
-
-		log.Printf("read %d bytes:\n%s", length, hex.Dump(payload))
 	}
 }
 

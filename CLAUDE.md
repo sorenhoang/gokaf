@@ -43,7 +43,7 @@ delegating it to Claude. Behave accordingly:
 
 ## Current status
 
-Phases 0–1 done. Next up: **Phase 2 — Request header parsing + dispatch skeleton** (Track A).
+Phases 0–2 done. Next up: **Phase 3 — ApiVersions (key=18)** (Track A).
 
 Full checklist with acceptance criteria per phase: [PROGRESS.md](PROGRESS.md).
 Update both this line and the matching checkbox in PROGRESS.md as phases
