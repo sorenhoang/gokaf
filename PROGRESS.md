@@ -17,7 +17,7 @@ not "done." Update this file as phases complete; keep `CLAUDE.md`'s
       AC: Test client sends a request with an unknown api_key → broker
       replies with a correct `ResponseHeader{correlation_id}` + error code,
       no crash.
-- [ ] **Phase 3** — ApiVersions (key=18)
+- [x] **Phase 3** — ApiVersions (key=18)
       AC: Test client sends ApiVersionsRequest → correctly parses the
       response.
 - [ ] **Phase 4** — Topic registry + Metadata (key=3)

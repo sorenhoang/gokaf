@@ -11,7 +11,9 @@ import (
 
 type HandlerFunc func(header protocol.RequestHeader, body []byte) ([]byte, error)
 
-var handlers = map[int16]HandlerFunc{}
+var handlers = map[int16]HandlerFunc{
+	18: handleApiVersions,
+}
 
 func Dispatch(conn net.Conn, payload []byte) error {
 	reader := bytes.NewReader(payload)
