@@ -20,7 +20,12 @@ func main() {
 
 	checkUnknownAPI(conn)
 	checkApiVersions(conn)
-	checkMetadata(conn)
+	checkCreateTopics(conn)
+	checkMetadataTopic(conn, "orders", true, 3)
+	checkCreateTopicsDuplicate(conn)
+	checkDeleteTopics(conn, "orders", 0)
+	checkMetadataTopic(conn, "orders", false, 0)
+	checkDeleteTopics(conn, "ghost", 3)
 }
 
 func checkUnknownAPI(conn net.Conn) {
@@ -122,11 +127,106 @@ func readAPIVersionEntry(dec *protocol.Decoder) (int16, int16, int16) {
 	return apiKey, minVersion, maxVersion
 }
 
-func checkMetadata(conn net.Conn) {
+func checkCreateTopics(conn net.Conn) {
+	header := protocol.RequestHeader{
+		APIKey:        19,
+		APIVersion:    0,
+		CorrelationID: 44,
+		ClientID:      nil,
+	}
+
+	e := protocol.NewEncoder()
+	protocol.WriteRequestHeader(e, header)
+	e.WriteArrayLen(1)
+	e.WriteString("orders")
+	e.WriteInt32(3)
+	e.WriteInt16(1)
+	e.WriteArrayLen(0)
+	e.WriteArrayLen(0)
+	e.WriteInt32(5000)
+	writeAndAssertTopicResult(conn, e.Bytes(), 44, "create_topics", "orders", 0)
+}
+
+func checkCreateTopicsDuplicate(conn net.Conn) {
+	header := protocol.RequestHeader{
+		APIKey:        19,
+		APIVersion:    0,
+		CorrelationID: 46,
+		ClientID:      nil,
+	}
+
+	e := protocol.NewEncoder()
+	protocol.WriteRequestHeader(e, header)
+	e.WriteArrayLen(1)
+	e.WriteString("orders")
+	e.WriteInt32(3)
+	e.WriteInt16(1)
+	e.WriteArrayLen(0)
+	e.WriteArrayLen(0)
+	e.WriteInt32(5000)
+	writeAndAssertTopicResult(conn, e.Bytes(), 46, "create_topics duplicate", "orders", 36)
+}
+
+func checkDeleteTopics(conn net.Conn, name string, wantCode int16) {
+	header := protocol.RequestHeader{
+		APIKey:        20,
+		APIVersion:    0,
+		CorrelationID: 47,
+		ClientID:      nil,
+	}
+
+	e := protocol.NewEncoder()
+	protocol.WriteRequestHeader(e, header)
+	e.WriteArrayLen(1)
+	e.WriteString(name)
+	e.WriteInt32(5000)
+	writeAndAssertTopicResult(conn, e.Bytes(), 47, "delete_topics", name, wantCode)
+}
+
+func writeAndAssertTopicResult(conn net.Conn, request []byte, correlationID int32, label string, wantName string, wantCode int16) {
+	if err := network.WriteFrame(conn, request); err != nil {
+		log.Fatal(err)
+	}
+
+	respPayload, err := network.ReadFrame(conn)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	dec := protocol.NewDecoder(bytes.NewReader(respPayload))
+	respHeader, err := protocol.ReadResponseHeader(dec)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if respHeader.CorrelationID != correlationID {
+		log.Fatal("unexpected " + label + " correlation_id=" + strconv.Itoa(int(respHeader.CorrelationID)))
+	}
+	resultCount, err := dec.ReadArrayLen()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read %s result count: %w", label, err))
+	}
+	if resultCount != 1 {
+		log.Fatal("unexpected " + label + " result count=" + strconv.Itoa(resultCount))
+	}
+	name, err := dec.ReadString()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read %s topic name: %w", label, err))
+	}
+	code, err := dec.ReadInt16()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read %s error_code: %w", label, err))
+	}
+	log.Printf("%s response: name=%s error_code=%d", label, name, code)
+	if name != wantName || code != wantCode {
+		log.Fatal("unexpected " + label + " response")
+	}
+}
+
+func checkMetadataTopic(conn net.Conn, wantName string, wantPresent bool, wantPartitions int) {
 	header := protocol.RequestHeader{
 		APIKey:        3,
 		APIVersion:    0,
-		CorrelationID: 44,
+		CorrelationID: 45,
 		ClientID:      nil,
 	}
 
@@ -147,7 +247,7 @@ func checkMetadata(conn net.Conn) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	if respHeader.CorrelationID != 44 {
+	if respHeader.CorrelationID != 45 {
 		log.Fatal("unexpected Metadata correlation_id=" + strconv.Itoa(int(respHeader.CorrelationID)))
 	}
 
@@ -180,7 +280,7 @@ func checkMetadata(conn net.Conn) {
 		log.Fatal(fmt.Errorf("read topic count: %w", err))
 	}
 
-	foundOrders := false
+	foundTopic := false
 	for i := 0; i < topicCount; i++ {
 		errorCode, err := dec.ReadInt16()
 		if err != nil {
@@ -196,7 +296,7 @@ func checkMetadata(conn net.Conn) {
 		}
 		log.Printf("metadata topic: name=%s error_code=%d partition_count=%d", name, errorCode, partitionCount)
 
-		topicHasLeader := false
+		topicHasExpectedLeaders := partitionCount == wantPartitions
 		for j := 0; j < partitionCount; j++ {
 			partitionErrorCode, err := dec.ReadInt16()
 			if err != nil {
@@ -229,17 +329,20 @@ func checkMetadata(conn net.Conn) {
 				}
 			}
 			log.Printf("metadata partition: topic=%s partition=%d error_code=%d leader_id=%d replicas=%d isr=%d", name, partitionIndex, partitionErrorCode, leaderID, replicaCount, isrCount)
-			if partitionErrorCode == 0 && leaderID == 1 {
-				topicHasLeader = true
+			if partitionErrorCode != 0 || leaderID != 1 {
+				topicHasExpectedLeaders = false
 			}
 		}
 
-		if errorCode == 0 && name == "orders" && partitionCount > 0 && topicHasLeader {
-			foundOrders = true
+		if errorCode == 0 && name == wantName && partitionCount == wantPartitions && topicHasExpectedLeaders {
+			foundTopic = true
 		}
 	}
 
-	if !foundOrders {
-		log.Fatal("Metadata response did not include orders with a leader")
+	if wantPresent && !foundTopic {
+		log.Fatal("Metadata response did not include expected topic " + wantName)
+	}
+	if !wantPresent && foundTopic {
+		log.Fatal("Metadata response still includes deleted topic " + wantName)
 	}
 }

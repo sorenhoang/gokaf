@@ -28,12 +28,14 @@ func TestHandleApiVersionsWritesV0ResponseBody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadArrayLen api keys: unexpected error: %v", err)
 	}
-	if apiCount != 2 {
-		t.Fatalf("api key count: got %d, want 2", apiCount)
+	if apiCount != 4 {
+		t.Fatalf("api key count: got %d, want 4", apiCount)
 	}
 
 	foundMetadata := false
 	foundApiVersions := false
+	foundCreateTopics := false
+	foundDeleteTopics := false
 	for i := 0; i < apiCount; i++ {
 		apiKey, minVersion, maxVersion := readAPIVersionEntry(t, dec)
 		if apiKey == 3 && minVersion == 0 && maxVersion == 0 {
@@ -42,9 +44,16 @@ func TestHandleApiVersionsWritesV0ResponseBody(t *testing.T) {
 		if apiKey == 18 && minVersion == 0 && maxVersion == 0 {
 			foundApiVersions = true
 		}
+		if apiKey == 19 && minVersion == 0 && maxVersion == 0 {
+			foundCreateTopics = true
+		}
+		if apiKey == 20 && minVersion == 0 && maxVersion == 0 {
+			foundDeleteTopics = true
+		}
 	}
-	if !foundMetadata || !foundApiVersions {
-		t.Fatalf("api versions: found_metadata=%t found_api_versions=%t, want both true", foundMetadata, foundApiVersions)
+	if !foundMetadata || !foundApiVersions || !foundCreateTopics || !foundDeleteTopics {
+		t.Fatalf("api versions: found_metadata=%t found_api_versions=%t found_create_topics=%t found_delete_topics=%t, want all true",
+			foundMetadata, foundApiVersions, foundCreateTopics, foundDeleteTopics)
 	}
 }
 

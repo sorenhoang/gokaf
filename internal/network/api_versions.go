@@ -11,6 +11,8 @@ type supportedAPI struct {
 var supportedAPIs = []supportedAPI{
 	{APIKey: 3, MinVersion: 0, MaxVersion: 0},
 	{APIKey: 18, MinVersion: 0, MaxVersion: 0},
+	{APIKey: 19, MinVersion: 0, MaxVersion: 0},
+	{APIKey: 20, MinVersion: 0, MaxVersion: 0},
 }
 
 func (b *Broker) handleApiVersions(header protocol.RequestHeader, body []byte) ([]byte, error) {

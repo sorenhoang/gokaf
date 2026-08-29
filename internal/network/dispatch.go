@@ -17,6 +17,8 @@ type handlerFunc func(*Broker, protocol.RequestHeader, []byte) ([]byte, error)
 var dispatchTable = map[int16]handlerFunc{
 	3:  (*Broker).handleMetadata,
 	18: (*Broker).handleApiVersions,
+	19: (*Broker).handleCreateTopics,
+	20: (*Broker).handleDeleteTopics,
 }
 
 type Broker struct {

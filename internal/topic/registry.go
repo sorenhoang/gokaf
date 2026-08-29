@@ -1,8 +1,14 @@
 package topic
 
 import (
+	"errors"
 	"slices"
 	"sync"
+)
+
+var (
+	ErrTopicExists   = errors.New("topic already exists")
+	ErrTopicNotFound = errors.New("topic not found")
 )
 
 type Partition struct {
@@ -66,4 +72,26 @@ func (r *Registry) Add(t Topic) {
 	defer r.mu.Unlock()
 
 	r.topics[t.Name] = cloneTopic(t)
+}
+
+func (r *Registry) Create(t Topic) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, ok := r.topics[t.Name]; ok {
+		return ErrTopicExists
+	}
+	r.topics[t.Name] = cloneTopic(t)
+	return nil
+}
+
+func (r *Registry) Delete(name string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, ok := r.topics[name]; !ok {
+		return ErrTopicNotFound
+	}
+	delete(r.topics, name)
+	return nil
 }

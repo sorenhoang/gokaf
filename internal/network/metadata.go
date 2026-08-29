@@ -7,11 +7,6 @@ import (
 	"github.com/sorenhoang/gokaf/internal/topic"
 )
 
-const (
-	errorNone                    int16 = 0
-	errorUnknownTopicOrPartition int16 = 3
-)
-
 func (b *Broker) handleMetadata(header protocol.RequestHeader, body []byte) ([]byte, error) {
 	dec := protocol.NewDecoder(bytes.NewReader(body))
 	topicCount, err := dec.ReadArrayLen()
@@ -51,7 +46,7 @@ func (b *Broker) handleMetadata(header protocol.RequestHeader, body []byte) ([]b
 		writeMetadataTopic(e, t)
 	}
 	for _, name := range unknownTopics {
-		e.WriteInt16(errorUnknownTopicOrPartition)
+		e.WriteInt16(protocol.ErrUnknownTopicOrPartition)
 		e.WriteString(name)
 		e.WriteArrayLen(0)
 	}
@@ -60,11 +55,11 @@ func (b *Broker) handleMetadata(header protocol.RequestHeader, body []byte) ([]b
 }
 
 func writeMetadataTopic(e *protocol.Encoder, t topic.Topic) {
-	e.WriteInt16(errorNone)
+	e.WriteInt16(protocol.ErrNone)
 	e.WriteString(t.Name)
 	e.WriteArrayLen(len(t.Partitions))
 	for _, p := range t.Partitions {
-		e.WriteInt16(errorNone)
+		e.WriteInt16(protocol.ErrNone)
 		e.WriteInt32(p.ID)
 		e.WriteInt32(p.Leader)
 		writeInt32Array(e, p.Replicas)

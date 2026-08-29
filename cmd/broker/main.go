@@ -18,13 +18,6 @@ func main() {
 		Topics: topic.NewRegistry(),
 	}
 	broker.Topics.Add(topic.Topic{
-		Name: "orders",
-		Partitions: []topic.Partition{
-			{ID: 0, Leader: 1, Replicas: []int32{1}, ISR: []int32{1}},
-			{ID: 1, Leader: 1, Replicas: []int32{1}, ISR: []int32{1}},
-		},
-	})
-	broker.Topics.Add(topic.Topic{
 		Name: "payments",
 		Partitions: []topic.Partition{
 			{ID: 0, Leader: 1, Replicas: []int32{1}, ISR: []int32{1}},

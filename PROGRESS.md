@@ -23,7 +23,7 @@ not "done." Update this file as phases complete; keep `CLAUDE.md`'s
 - [x] **Phase 4** — Topic registry + Metadata (key=3)
       AC: `MetadataRequest(topics=nil)` returns the correct
       topic/partition/leader list.
-- [ ] **Phase 5** — CreateTopics / DeleteTopics (key=19/20)
+- [x] **Phase 5** — CreateTopics / DeleteTopics (key=19/20)
       AC: Create topic "orders" with 3 partitions → Metadata reflects it
       correctly.
 - [ ] **Phase 6** — Storage engine — segmented log

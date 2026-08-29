@@ -146,7 +146,7 @@ func TestHandleMetadataUnknownTopicReturnsErrorCode3(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadArrayLen partitions: unexpected error: %v", err)
 	}
-	if errorCode != errorUnknownTopicOrPartition || name != "ghost" || partitionCount != 0 {
+	if errorCode != protocol.ErrUnknownTopicOrPartition || name != "ghost" || partitionCount != 0 {
 		t.Fatalf("unknown topic: got {error=%d, name=%q, partitions=%d}, want {3, %q, 0}", errorCode, name, partitionCount, "ghost")
 	}
 }
