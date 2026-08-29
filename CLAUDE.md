@@ -43,7 +43,7 @@ delegating it to Claude. Behave accordingly:
 
 ## Current status
 
-Phases 0–8 done. Next up: **Phase 9 — Offset index + segment rolling** (Track A).
+Phases 0–9 done. Next up: **Phase 10 — ListOffsets + full multi-partition support** (Track A).
 
 Full checklist with acceptance criteria per phase: [PROGRESS.md](PROGRESS.md).
 Update both this line and the matching checkbox in PROGRESS.md as phases

@@ -36,7 +36,7 @@ not "done." Update this file as phases complete; keep `CLAUDE.md`'s
 - [x] **Phase 8** — Fetch API (key=1)
       AC: Produce 10 messages → Fetch from offset 0 → receive all 10,
       correct order, correct content.
-- [ ] **Phase 9** — Offset index + segment rolling
+- [x] **Phase 9** — Offset index + segment rolling
       AC: Generate enough data to produce 2+ segments; Fetch from a later
       segment returns correct data. Benchmark shows lookup is meaningfully
       faster than the Phase 6 linear scan.
