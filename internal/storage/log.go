@@ -107,6 +107,13 @@ func (l *Log) Read(offset int64, maxBytes int) ([]Record, error) {
 	return readRecords(l.file, offset, maxBytes)
 }
 
+func (l *Log) EndOffset() int64 {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	return l.nextOffset
+}
+
 func (l *Log) Close() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()

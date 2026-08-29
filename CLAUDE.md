@@ -43,7 +43,7 @@ delegating it to Claude. Behave accordingly:
 
 ## Current status
 
-Phases 0–7 done. Next up: **Phase 8 — Fetch API** (Track A).
+Phases 0–8 done. Next up: **Phase 9 — Offset index + segment rolling** (Track A).
 
 Full checklist with acceptance criteria per phase: [PROGRESS.md](PROGRESS.md).
 Update both this line and the matching checkbox in PROGRESS.md as phases

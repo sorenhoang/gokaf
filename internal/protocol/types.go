@@ -93,6 +93,12 @@ func (e *Encoder) WriteNullableString(s *string) {
 	e.WriteString(*s)
 }
 
+// WriteBytes writes an INT32 length prefix followed by raw bytes.
+func (e *Encoder) WriteBytes(b []byte) {
+	e.WriteInt32(int32(len(b)))
+	e.buf.Write(b)
+}
+
 // WriteCompactString writes a non-nullable COMPACT_STRING: an unsigned
 // varint length of len(s)+1, followed by the raw UTF-8 bytes.
 func (e *Encoder) WriteCompactString(s string) {
@@ -243,6 +249,23 @@ func (d *Decoder) ReadNullableString() (*string, error) {
 	}
 	s := string(buf)
 	return &s, nil
+}
+
+// ReadBytes reads an INT32 length prefix followed by raw bytes. A length of
+// -1 returns nil.
+func (d *Decoder) ReadBytes() ([]byte, error) {
+	n, err := d.ReadInt32()
+	if err != nil {
+		return nil, err
+	}
+	if n < 0 {
+		return nil, nil
+	}
+	buf := make([]byte, n)
+	if _, err := io.ReadFull(d.r, buf); err != nil {
+		return nil, err
+	}
+	return buf, nil
 }
 
 // ReadCompactString reads a non-nullable COMPACT_STRING.

@@ -3,8 +3,10 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"flag"
 	"fmt"
 	"hash/crc32"
+	"io"
 	"log"
 	"net"
 	"strconv"
@@ -14,6 +16,9 @@ import (
 )
 
 func main() {
+	mode := flag.String("mode", "full", "test mode: full, produce-fetch, fetch-only")
+	flag.Parse()
+
 	conn, err := net.Dial("tcp", "localhost:9092")
 	if err != nil {
 		log.Fatal(err)
@@ -22,14 +27,31 @@ func main() {
 
 	checkUnknownAPI(conn)
 	checkApiVersions(conn)
-	checkCreateTopics(conn)
-	checkMetadataTopic(conn, "orders", true, 3)
-	checkProduce(conn, "first", 48, 0)
-	checkProduce(conn, "second", 49, 1)
-	checkCreateTopicsDuplicate(conn)
-	checkDeleteTopics(conn, "orders", 0)
-	checkMetadataTopic(conn, "orders", false, 0)
-	checkDeleteTopics(conn, "ghost", 3)
+	switch *mode {
+	case "full":
+		checkCreateTopics(conn, 44, 0)
+		checkMetadataTopic(conn, "orders", true, 3)
+		for i := 0; i < 10; i++ {
+			checkProduce(conn, fmt.Sprintf("msg-%d", i), int32(48+i), int64(i))
+		}
+		checkFetch(conn)
+		checkCreateTopicsDuplicate(conn)
+		checkDeleteTopics(conn, "orders", 0)
+		checkMetadataTopic(conn, "orders", false, 0)
+		checkDeleteTopics(conn, "ghost", 3)
+	case "produce-fetch":
+		checkCreateTopics(conn, 44, 0)
+		checkMetadataTopic(conn, "orders", true, 3)
+		for i := 0; i < 10; i++ {
+			checkProduce(conn, fmt.Sprintf("msg-%d", i), int32(48+i), int64(i))
+		}
+		checkFetch(conn)
+	case "fetch-only":
+		checkMetadataTopic(conn, "orders", true, 1)
+		checkFetch(conn)
+	default:
+		log.Fatal("unknown mode: " + *mode)
+	}
 }
 
 func checkUnknownAPI(conn net.Conn) {
@@ -131,11 +153,11 @@ func readAPIVersionEntry(dec *protocol.Decoder) (int16, int16, int16) {
 	return apiKey, minVersion, maxVersion
 }
 
-func checkCreateTopics(conn net.Conn) {
+func checkCreateTopics(conn net.Conn, correlationID int32, wantCode int16) {
 	header := protocol.RequestHeader{
 		APIKey:        19,
 		APIVersion:    0,
-		CorrelationID: 44,
+		CorrelationID: correlationID,
 		ClientID:      nil,
 	}
 
@@ -148,7 +170,7 @@ func checkCreateTopics(conn net.Conn) {
 	e.WriteArrayLen(0)
 	e.WriteArrayLen(0)
 	e.WriteInt32(5000)
-	writeAndAssertTopicResult(conn, e.Bytes(), 44, "create_topics", "orders", 0)
+	writeAndAssertTopicResult(conn, e.Bytes(), correlationID, "create_topics", "orders", wantCode)
 }
 
 func checkCreateTopicsDuplicate(conn net.Conn) {
@@ -261,6 +283,91 @@ func checkProduce(conn net.Conn, value string, correlationID int32, wantBaseOffs
 	}
 }
 
+func checkFetch(conn net.Conn) {
+	header := protocol.RequestHeader{
+		APIKey:        1,
+		APIVersion:    0,
+		CorrelationID: 58,
+		ClientID:      nil,
+	}
+
+	e := protocol.NewEncoder()
+	protocol.WriteRequestHeader(e, header)
+	e.WriteInt32(-1)
+	e.WriteInt32(0)
+	e.WriteInt32(1)
+	e.WriteArrayLen(1)
+	e.WriteString("orders")
+	e.WriteArrayLen(1)
+	e.WriteInt32(0)
+	e.WriteInt64(0)
+	e.WriteInt32(1 << 20)
+	if err := network.WriteFrame(conn, e.Bytes()); err != nil {
+		log.Fatal(err)
+	}
+
+	respPayload, err := network.ReadFrame(conn)
+	if err != nil {
+		log.Fatal(err)
+	}
+	dec := protocol.NewDecoder(bytes.NewReader(respPayload))
+	respHeader, err := protocol.ReadResponseHeader(dec)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if respHeader.CorrelationID != 58 {
+		log.Fatal("unexpected Fetch correlation_id=" + strconv.Itoa(int(respHeader.CorrelationID)))
+	}
+	topicCount, err := dec.ReadArrayLen()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read fetch topic count: %w", err))
+	}
+	if topicCount != 1 {
+		log.Fatal("unexpected Fetch topic count=" + strconv.Itoa(topicCount))
+	}
+	topicName, err := dec.ReadString()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read fetch topic name: %w", err))
+	}
+	partitionCount, err := dec.ReadArrayLen()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read fetch partition count: %w", err))
+	}
+	if topicName != "orders" || partitionCount != 1 {
+		log.Fatal("unexpected Fetch topic response")
+	}
+	partition, err := dec.ReadInt32()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read fetch partition: %w", err))
+	}
+	errorCode, err := dec.ReadInt16()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read fetch error_code: %w", err))
+	}
+	highWatermark, err := dec.ReadInt64()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read fetch high_watermark: %w", err))
+	}
+	recordSet, err := dec.ReadBytes()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read fetch records: %w", err))
+	}
+	values := decodeRecordSet(recordSet)
+	log.Printf("fetch response: topic=%s partition=%d error_code=%d high_watermark=%d values=%v", topicName, partition, errorCode, highWatermark, values)
+	if partition != 0 || errorCode != 0 || highWatermark != 10 {
+		log.Fatal("unexpected Fetch partition response")
+	}
+	if len(values) != 10 {
+		log.Fatal("unexpected Fetch value count=" + strconv.Itoa(len(values)))
+	}
+	for i, value := range values {
+		want := fmt.Sprintf("msg-%d", i)
+		if value != want {
+			log.Fatal("unexpected Fetch value at " + strconv.Itoa(i) + ": got " + value + " want " + want)
+		}
+	}
+}
+
 func writeAndAssertTopicResult(conn net.Conn, request []byte, correlationID int32, label string, wantName string, wantCode int16) {
 	if err := network.WriteFrame(conn, request); err != nil {
 		log.Fatal(err)
@@ -338,6 +445,99 @@ func buildRecord(value string) []byte {
 	record := protocol.NewEncoder()
 	record.WriteVarint(int32(len(recordBody)))
 	return append(record.Bytes(), recordBody...)
+}
+
+func decodeRecordSet(recordSet []byte) []string {
+	var values []string
+	reader := bytes.NewReader(recordSet)
+	for reader.Len() > 0 {
+		batchStart := int64(len(recordSet) - reader.Len())
+		dec := protocol.NewDecoder(reader)
+		mustReadInt64(dec, "base_offset")
+		batchLength := mustReadInt32(dec, "batch_length")
+		mustReadInt32(dec, "partition_leader_epoch")
+		magic := mustReadInt8(dec, "magic")
+		if magic != 2 {
+			log.Fatal("unexpected batch magic=" + strconv.Itoa(int(magic)))
+		}
+		mustReadInt32(dec, "crc")
+		mustReadInt16(dec, "attributes")
+		mustReadInt32(dec, "last_offset_delta")
+		mustReadInt64(dec, "base_timestamp")
+		mustReadInt64(dec, "max_timestamp")
+		mustReadInt64(dec, "producer_id")
+		mustReadInt16(dec, "producer_epoch")
+		mustReadInt32(dec, "base_sequence")
+		recordCount := mustReadInt32(dec, "record_count")
+		for i := 0; i < int(recordCount); i++ {
+			values = append(values, decodeRecordValue(reader, dec))
+		}
+		if _, err := reader.Seek(batchStart+12+int64(batchLength), io.SeekStart); err != nil {
+			log.Fatal(fmt.Errorf("seek next batch: %w", err))
+		}
+	}
+	return values
+}
+
+func decodeRecordValue(reader *bytes.Reader, dec *protocol.Decoder) string {
+	mustReadVarint(dec, "record_length")
+	mustReadInt8(dec, "record_attributes")
+	mustReadVarint(dec, "timestamp_delta")
+	mustReadVarint(dec, "offset_delta")
+	keyLength := mustReadVarint(dec, "key_length")
+	if keyLength > 0 {
+		key := make([]byte, keyLength)
+		if _, err := io.ReadFull(reader, key); err != nil {
+			log.Fatal(fmt.Errorf("read key: %w", err))
+		}
+	}
+	valueLength := mustReadVarint(dec, "value_length")
+	value := make([]byte, valueLength)
+	if _, err := io.ReadFull(reader, value); err != nil {
+		log.Fatal(fmt.Errorf("read value: %w", err))
+	}
+	mustReadVarint(dec, "header_count")
+	return string(value)
+}
+
+func mustReadInt8(dec *protocol.Decoder, field string) int8 {
+	value, err := dec.ReadInt8()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read %s: %w", field, err))
+	}
+	return value
+}
+
+func mustReadInt16(dec *protocol.Decoder, field string) int16 {
+	value, err := dec.ReadInt16()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read %s: %w", field, err))
+	}
+	return value
+}
+
+func mustReadInt32(dec *protocol.Decoder, field string) int32 {
+	value, err := dec.ReadInt32()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read %s: %w", field, err))
+	}
+	return value
+}
+
+func mustReadInt64(dec *protocol.Decoder, field string) int64 {
+	value, err := dec.ReadInt64()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read %s: %w", field, err))
+	}
+	return value
+}
+
+func mustReadVarint(dec *protocol.Decoder, field string) int32 {
+	value, err := dec.ReadVarint()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read %s: %w", field, err))
+	}
+	return value
 }
 
 func putInt16(dst []byte, value int16) {

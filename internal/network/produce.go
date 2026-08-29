@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"hash/crc32"
-	"io"
 	"log"
 
 	"github.com/sorenhoang/gokaf/internal/protocol"
@@ -60,7 +59,7 @@ func (b *Broker) handleProduce(header protocol.RequestHeader, body []byte) ([]by
 			if err != nil {
 				return nil, err
 			}
-			batch, err := readBytes(reader, dec)
+			batch, err := dec.ReadBytes()
 			if err != nil {
 				return nil, err
 			}
@@ -105,22 +104,6 @@ func (b *Broker) producePartition(topicName string, partitionIndex int32, batch 
 	response.errorCode = protocol.ErrNone
 	response.baseOffset = baseOffset
 	return response
-}
-
-func readBytes(reader *bytes.Reader, dec *protocol.Decoder) ([]byte, error) {
-	length, err := dec.ReadInt32()
-	if err != nil {
-		return nil, err
-	}
-	if length < 0 {
-		return nil, io.ErrUnexpectedEOF
-	}
-
-	value := make([]byte, length)
-	if _, err := io.ReadFull(reader, value); err != nil {
-		return nil, err
-	}
-	return value, nil
 }
 
 func validRecordBatch(batch []byte) bool {

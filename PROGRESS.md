@@ -33,7 +33,7 @@ not "done." Update this file as phases complete; keep `CLAUDE.md`'s
       AC: Test client hand-encodes a valid RecordBatch → sends Produce →
       receives the correct base offset. On-disk bytes match the worked
       examples in KIP-98.
-- [ ] **Phase 8** — Fetch API (key=1)
+- [x] **Phase 8** — Fetch API (key=1)
       AC: Produce 10 messages → Fetch from offset 0 → receive all 10,
       correct order, correct content.
 - [ ] **Phase 9** — Offset index + segment rolling
