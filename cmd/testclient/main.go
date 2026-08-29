@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
+	"hash/crc32"
 	"log"
 	"net"
 	"strconv"
@@ -22,6 +24,8 @@ func main() {
 	checkApiVersions(conn)
 	checkCreateTopics(conn)
 	checkMetadataTopic(conn, "orders", true, 3)
+	checkProduce(conn, "first", 48, 0)
+	checkProduce(conn, "second", 49, 1)
 	checkCreateTopicsDuplicate(conn)
 	checkDeleteTopics(conn, "orders", 0)
 	checkMetadataTopic(conn, "orders", false, 0)
@@ -183,6 +187,80 @@ func checkDeleteTopics(conn net.Conn, name string, wantCode int16) {
 	writeAndAssertTopicResult(conn, e.Bytes(), 47, "delete_topics", name, wantCode)
 }
 
+func checkProduce(conn net.Conn, value string, correlationID int32, wantBaseOffset int64) {
+	batch := buildRecordBatch(value)
+
+	header := protocol.RequestHeader{
+		APIKey:        0,
+		APIVersion:    0,
+		CorrelationID: correlationID,
+		ClientID:      nil,
+	}
+
+	e := protocol.NewEncoder()
+	protocol.WriteRequestHeader(e, header)
+	e.WriteInt16(1)
+	e.WriteInt32(5000)
+	e.WriteArrayLen(1)
+	e.WriteString("orders")
+	e.WriteArrayLen(1)
+	e.WriteInt32(0)
+	e.WriteInt32(int32(len(batch)))
+	request := append(e.Bytes(), batch...)
+
+	if err := network.WriteFrame(conn, request); err != nil {
+		log.Fatal(err)
+	}
+	respPayload, err := network.ReadFrame(conn)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	dec := protocol.NewDecoder(bytes.NewReader(respPayload))
+	respHeader, err := protocol.ReadResponseHeader(dec)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if respHeader.CorrelationID != correlationID {
+		log.Fatal("unexpected Produce correlation_id=" + strconv.Itoa(int(respHeader.CorrelationID)))
+	}
+	topicCount, err := dec.ReadArrayLen()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read produce topic count: %w", err))
+	}
+	if topicCount != 1 {
+		log.Fatal("unexpected Produce topic count=" + strconv.Itoa(topicCount))
+	}
+	topicName, err := dec.ReadString()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read produce topic name: %w", err))
+	}
+	partitionCount, err := dec.ReadArrayLen()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read produce partition count: %w", err))
+	}
+	if topicName != "orders" || partitionCount != 1 {
+		log.Fatal("unexpected Produce topic response")
+	}
+	partition, err := dec.ReadInt32()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read produce partition: %w", err))
+	}
+	errorCode, err := dec.ReadInt16()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read produce error_code: %w", err))
+	}
+	baseOffset, err := dec.ReadInt64()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read produce base_offset: %w", err))
+	}
+
+	log.Printf("produce response: topic=%s partition=%d error_code=%d base_offset=%d", topicName, partition, errorCode, baseOffset)
+	if partition != 0 || errorCode != 0 || baseOffset != wantBaseOffset {
+		log.Fatal("unexpected Produce response")
+	}
+}
+
 func writeAndAssertTopicResult(conn net.Conn, request []byte, correlationID int32, label string, wantName string, wantCode int16) {
 	if err := network.WriteFrame(conn, request); err != nil {
 		log.Fatal(err)
@@ -220,6 +298,58 @@ func writeAndAssertTopicResult(conn net.Conn, request []byte, correlationID int3
 	if name != wantName || code != wantCode {
 		log.Fatal("unexpected " + label + " response")
 	}
+}
+
+func buildRecordBatch(value string) []byte {
+	record := buildRecord(value)
+	batch := make([]byte, 61, 61+len(record))
+
+	binary.BigEndian.PutUint64(batch[0:8], 0)
+	putInt32(batch[12:16], -1)
+	batch[16] = 2
+	putInt16(batch[21:23], 0)
+	putInt32(batch[23:27], 0)
+	putInt64(batch[27:35], 1700000000000)
+	putInt64(batch[35:43], 1700000000000)
+	putInt64(batch[43:51], -1)
+	putInt16(batch[51:53], -1)
+	putInt32(batch[53:57], -1)
+	putInt32(batch[57:61], 1)
+	batch = append(batch, record...)
+
+	putInt32(batch[8:12], int32(len(batch)-12))
+	crc := crc32.Checksum(batch[21:], crc32.MakeTable(crc32.Castagnoli))
+	binary.BigEndian.PutUint32(batch[17:21], crc)
+	return batch
+}
+
+func buildRecord(value string) []byte {
+	body := protocol.NewEncoder()
+	body.WriteInt8(0)
+	body.WriteVarint(0)
+	body.WriteVarint(0)
+	body.WriteVarint(-1)
+	body.WriteVarint(int32(len(value)))
+	recordBody := append(body.Bytes(), []byte(value)...)
+	trailer := protocol.NewEncoder()
+	trailer.WriteVarint(0)
+	recordBody = append(recordBody, trailer.Bytes()...)
+
+	record := protocol.NewEncoder()
+	record.WriteVarint(int32(len(recordBody)))
+	return append(record.Bytes(), recordBody...)
+}
+
+func putInt16(dst []byte, value int16) {
+	binary.BigEndian.PutUint16(dst, uint16(value))
+}
+
+func putInt32(dst []byte, value int32) {
+	binary.BigEndian.PutUint32(dst, uint32(value))
+}
+
+func putInt64(dst []byte, value int64) {
+	binary.BigEndian.PutUint64(dst, uint64(value))
 }
 
 func checkMetadataTopic(conn net.Conn, wantName string, wantPresent bool, wantPartitions int) {

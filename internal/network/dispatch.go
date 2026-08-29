@@ -7,6 +7,7 @@ import (
 	"net"
 
 	"github.com/sorenhoang/gokaf/internal/protocol"
+	"github.com/sorenhoang/gokaf/internal/storage"
 	"github.com/sorenhoang/gokaf/internal/topic"
 )
 
@@ -15,6 +16,7 @@ import (
 type handlerFunc func(*Broker, protocol.RequestHeader, []byte) ([]byte, error)
 
 var dispatchTable = map[int16]handlerFunc{
+	0:  (*Broker).handleProduce,
 	3:  (*Broker).handleMetadata,
 	18: (*Broker).handleApiVersions,
 	19: (*Broker).handleCreateTopics,
@@ -26,6 +28,7 @@ type Broker struct {
 	Host   string
 	Port   int32
 	Topics *topic.Registry
+	Logs   *storage.Manager
 }
 
 func (b *Broker) Dispatch(conn net.Conn, payload []byte) error {

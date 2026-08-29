@@ -35,5 +35,8 @@ go.work.sum
 /broker
 /testclient
 
+# Broker data directory (default -data path)
+/data/
+
 # Serena MCP local tool state
 .serena/

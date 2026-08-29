@@ -29,7 +29,7 @@ not "done." Update this file as phases complete; keep `CLAUDE.md`'s
 - [x] **Phase 6** — Storage engine — segmented log
       AC: Append 1000 fake records, read back correctly at arbitrary
       offsets. Restart the process (close/reopen the file) → data survives.
-- [ ] **Phase 7** — Produce API (key=0)
+- [x] **Phase 7** — Produce API (key=0)
       AC: Test client hand-encodes a valid RecordBatch → sends Produce →
       receives the correct base offset. On-disk bytes match the worked
       examples in KIP-98.

@@ -2,21 +2,28 @@ package main
 
 import (
 	"errors"
+	"flag"
 	"io"
 	"log"
 	"net"
 
 	"github.com/sorenhoang/gokaf/internal/network"
+	"github.com/sorenhoang/gokaf/internal/storage"
 	"github.com/sorenhoang/gokaf/internal/topic"
 )
 
 func main() {
+	dataDir := flag.String("data", "./data", "directory for partition log segments")
+	flag.Parse()
+
 	broker := &network.Broker{
 		NodeID: 1,
 		Host:   "localhost",
 		Port:   9092,
 		Topics: topic.NewRegistry(),
+		Logs:   storage.NewManager(*dataDir),
 	}
+	defer broker.Logs.Close()
 	broker.Topics.Add(topic.Topic{
 		Name: "payments",
 		Partitions: []topic.Partition{
@@ -29,7 +36,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	log.Println("broker listening on :9092")
+	log.Printf("broker listening on :9092 data_dir=%s", *dataDir)
 
 	for {
 		conn, err := listener.Accept()

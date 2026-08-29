@@ -62,10 +62,17 @@ func Open(dir string) (*Log, error) {
 }
 
 func (l *Log) Append(payload []byte) (offset int64, err error) {
+	return l.AppendWithOffset(payload, nil)
+}
+
+func (l *Log) AppendWithOffset(payload []byte, stamp func(offset int64)) (offset int64, err error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
 	offset = l.nextOffset
+	if stamp != nil {
+		stamp(offset)
+	}
 
 	var header [entryHeaderSize]byte
 	binary.BigEndian.PutUint64(header[0:8], uint64(offset))

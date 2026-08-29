@@ -43,7 +43,7 @@ delegating it to Claude. Behave accordingly:
 
 ## Current status
 
-Phases 0–6 done. Next up: **Phase 7 — Produce API** (Track A).
+Phases 0–7 done. Next up: **Phase 8 — Fetch API** (Track A).
 
 Full checklist with acceptance criteria per phase: [PROGRESS.md](PROGRESS.md).
 Update both this line and the matching checkbox in PROGRESS.md as phases
