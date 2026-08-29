@@ -2,9 +2,10 @@
 
 A Kafka-compatible broker written from scratch in Go, built as a learning project
 (coming from .NET/C#) to go deep on Go and Kafka internals. Full plan:
-[docs/master-plan.html](docs/master-plan.html) — 23 phases across 5 tracks
+[docs/master-plan.html](docs/master-plan.html) — 28 phases across 6 tracks
 (A: protocol & storage core, B: consumer groups, C: idempotent producer,
-D: replication, E: controller election).
+D: replication, E: controller election, F: React Kafka UI over an in-broker
+HTTP admin API, built last).
 
 ## The one rule that matters: phase by phase, guide don't build
 

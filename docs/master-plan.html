@@ -18,6 +18,7 @@
     --track-c: #f6ad55;
     --track-d: #fc8181;
     --track-e: #d6a4ff;
+    --track-f: #63b3ed;
     --code-bg: #0b0d12;
   }
   * { box-sizing: border-box; }
@@ -132,12 +133,14 @@
   .trackC .track-badge { background: rgba(246,173,85,0.15); color: var(--track-c); }
   .trackD .track-badge { background: rgba(252,129,129,0.15); color: var(--track-d); }
   .trackE .track-badge { background: rgba(214,164,255,0.15); color: var(--track-e); }
+  .trackF .track-badge { background: rgba(99,179,237,0.15); color: var(--track-f); }
 
   .trackA .phase { border-left-color: var(--track-a); }
   .trackB .phase { border-left-color: var(--track-b); }
   .trackC .phase { border-left-color: var(--track-c); }
   .trackD .phase { border-left-color: var(--track-d); }
   .trackE .phase { border-left-color: var(--track-e); }
+  .trackF .phase { border-left-color: var(--track-f); }
 
   .phase {
     background: var(--panel);
@@ -270,6 +273,15 @@
   <ul>
     <li><a href="#phase-22">Phase 22 — Controller election</a></li>
     <li><a href="#phase-23">Phase 23 — Metadata log (KRaft-style)</a></li>
+  </ul>
+
+  <h2>Track F — Kafka UI</h2>
+  <ul>
+    <li><a href="#phase-24">Phase 24 — Ops layer + HTTP skeleton</a></li>
+    <li><a href="#phase-25">Phase 25 — RecordBatch codec + produce/fetch API</a></li>
+    <li><a href="#phase-26">Phase 26 — React dashboard + console</a></li>
+    <li><a href="#phase-27">Phase 27 — Consumer-group + producer panels</a></li>
+    <li><a href="#phase-28">Phase 28 — Cluster view + failure injection</a></li>
   </ul>
 </nav>
 
@@ -587,6 +599,61 @@
         <dt>Output</dt><dd>The controller writes every cluster change (topic create/delete, leader changes, broker join/leave) to its own append-only log (reusing the Track A storage engine). Other brokers replay this log to stay in sync — this is the core idea behind KRaft.</dd>
         <dt>Acceptance criteria</dt><dd>Restart the entire cluster → every broker replays the log and ends up with identical metadata.</dd>
         <div class="limitation"><strong>Known limitation:</strong> this does <em>not</em> implement real Raft consensus and does not guarantee safety under an actual network partition or split-brain scenario. It teaches the idea, not a production-safe implementation. Real Raft belongs in its own project — start by reading <code>etcd/raft</code>, don't build it from scratch bolted onto this broker.</div>
+      </dl>
+    </div>
+  </div>
+
+  <!-- TRACK F -->
+  <div class="track trackF">
+    <div class="track-header">
+      <h2>Track F — Kafka UI</h2>
+      <span class="track-badge">Phases 24–28 · web</span>
+    </div>
+    <p class="track-note">A React state-inspector + test console over an HTTP/JSON admin API built into the broker. Read-only dashboard (topics, partitions, offsets, ISR, consumer-group lag) plus actions (create/delete topic, produce, fetch/browse, reset group offset, inject faults). Built last, against a finished broker. Full spec + implementation plan to be written when the track starts — the broker will have changed through B–E.</p>
+
+    <div class="phase" id="phase-24">
+      <h3><span class="phase-id">Phase 24</span> Broker operations layer + HTTP skeleton</h3>
+      <dl>
+        <dt>Input</dt><dd>A complete broker (Tracks A–E).</dd>
+        <dt>Output</dt><dd>Extract <code>internal/broker</code> (the "manager" layer): split every wire handler into a thin decode/encode shell plus a Go-struct op method (<code>b.Produce</code>, <code>b.CreateTopic</code>, <code>b.Metadata</code>, …). Ops return Go sentinel errors; a <code>wireError(err) int16</code> helper does the Kafka error-code translation in one place. New <code>internal/httpapi</code> package with a <code>net/http</code> mux and a <code>-http-addr</code> flag (empty = disabled). Endpoints: <code>GET /api/v1/broker</code>, <code>GET /api/v1/topics</code>.</dd>
+        <dt>Acceptance criteria</dt><dd><code>curl localhost:8080/api/v1/topics</code> returns the correct topic / partition / start-offset / end-offset / high-watermark list as JSON, and every existing Kafka wire test still passes unchanged.</dd>
+        <dt>Go concepts</dt><ul>
+          <li><code>net/http.ServeMux</code>, <code>http.Handler</code>, JSON via <code>encoding/json</code> struct tags</li>
+          <li>Running a second listener alongside the Kafka TCP listener (goroutine + graceful shutdown)</li>
+        </ul>
+      </dl>
+    </div>
+
+    <div class="phase" id="phase-25">
+      <h3><span class="phase-id">Phase 25</span> Shared RecordBatch codec + produce/fetch API</h3>
+      <dl>
+        <dt>Output</dt><dd>Move the v2 RecordBatch encode/decode out of <code>cmd/testclient</code> into a shared package (<code>internal/protocol/recordbatch.go</code>); <code>testclient</code> uses it. HTTP action endpoints: <code>POST /api/v1/topics</code>, <code>DELETE /api/v1/topics/{name}</code>, <code>POST /api/v1/produce</code> (<code>{topic, partition, key?, value}</code> → builds a batch, calls <code>b.Produce</code>, returns <code>{base_offset}</code>), <code>POST /api/v1/fetch</code> (calls <code>b.Fetch</code>, decodes each batch into <code>{offset, key, value, timestamp}</code>). Each edge maps <code>error</code> → HTTP status + <code>{"error": "..."}</code>.</dd>
+        <dt>Acceptance criteria</dt><dd>Produce a message with a key and value via <code>curl</code>, then fetch that partition from offset 0 via <code>curl</code> → the decoded key and value match, and the on-disk bytes are identical to what a wire-protocol Produce would have written.</dd>
+      </dl>
+    </div>
+
+    <div class="phase" id="phase-26">
+      <h3><span class="phase-id">Phase 26</span> React dashboard + console</h3>
+      <dl>
+        <dt>Output</dt><dd><code>web/</code> — Vite + React + TypeScript, no state-management library (a 1s polling hook + <code>useState</code>). Built <code>web/dist</code> embedded via <code>go:embed</code> and served by the broker at <code>/</code>; Vite dev server proxies <code>/api</code> in development. Dashboard: topics table with per-partition leader / replicas / ISR / start & end offset / high watermark / segment count / size. Console: create-topic form, produce form, fetch/browse view. Multi-broker: a static <code>brokers.ts</code> endpoint list; every view fetches from all brokers and merges, flagging disagreements.</dd>
+        <dt>Acceptance criteria</dt><dd><code>npm run build &amp;&amp; go run ./cmd/broker</code>, open <code>localhost:8080</code>, and create a topic → produce several messages → browse them back, entirely from the UI.</dd>
+      </dl>
+    </div>
+
+    <div class="phase" id="phase-27">
+      <h3><span class="phase-id">Phase 27</span> Consumer-group + producer panels</h3>
+      <dl>
+        <dt>Output</dt><dd><code>GET /api/v1/groups</code> (state, members, per-member assignments, committed offset and lag per partition), <code>GET /api/v1/producers</code> (active PIDs, epoch, last sequence per partition), <code>POST /api/v1/groups/{id}/reset-offset</code>. React Groups panel and Producers panel.</dd>
+        <dt>Acceptance criteria</dt><dd>Run a simulated consumer group via <code>testclient</code> → the UI shows members, assignments, and lag updating within a poll interval. Reset a group's committed offset from the UI → the group re-consumes from there.</dd>
+      </dl>
+    </div>
+
+    <div class="phase" id="phase-28">
+      <h3><span class="phase-id">Phase 28</span> Cluster view + failure injection</h3>
+      <dl>
+        <dt>Output</dt><dd>A <code>Faults</code> config type on the broker (slow-follower delay, drop controller heartbeats, pause), consulted by the Track D ReplicaFetcher loop and the Track E controller-heartbeat path; default zero value is a no-op. <code>GET /api/v1/cluster</code> (this broker's peer reachability + controller id), <code>GET</code>/<code>POST /api/v1/faults</code>, <code>POST /api/v1/shutdown</code> / <code>/pause</code> / <code>/resume</code>. React Cluster panel (all N brokers side by side, disagreement highlighting) and Chaos panel (fault toggles).</dd>
+        <dt>Acceptance criteria</dt><dd>From the UI only: slow a follower and watch its partition leave the ISR in the cluster panel; kill the controller and watch a new one get elected; kill a partition leader mid-produce and watch failover complete — no terminal involved.</dd>
+        <div class="limitation"><strong>Scope:</strong> state inspector, not a metrics dashboard. No request/throughput counters, no latency histograms, no time-series store — everything shown is current state derivable from the registry, storage, group coordinator, PID manager, and controller.</div>
       </dl>
     </div>
   </div>

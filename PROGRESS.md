@@ -97,3 +97,28 @@ not "done." Update this file as phases complete; keep `CLAUDE.md`'s
 - [ ] **Phase 23** — KRaft-style metadata log (optional)
       AC: Restart the entire cluster → every broker replays the log and
       ends up with identical metadata.
+
+## Track F — Kafka UI (Phases 24–28)
+
+React state-inspector + test console over an HTTP/JSON admin API built into
+the broker. Built last, against a finished broker. Full spec + implementation
+plan to be written when the track starts.
+
+- [ ] **Phase 24** — Broker operations layer + HTTP skeleton
+      AC: `curl localhost:8080/api/v1/topics` returns the correct
+      topic/partition/offset list as JSON; every existing Kafka wire test
+      still passes unchanged.
+- [ ] **Phase 25** — Shared RecordBatch codec + produce/fetch API
+      AC: Produce a keyed message via `curl`, fetch it back via `curl` →
+      decoded key/value match, on-disk bytes identical to a wire Produce.
+- [ ] **Phase 26** — React dashboard + console
+      AC: `npm run build && go run ./cmd/broker`, open `localhost:8080`,
+      create a topic → produce → browse it back, entirely from the UI.
+- [ ] **Phase 27** — Consumer-group + producer panels
+      AC: Run a simulated consumer group via testclient → UI shows members,
+      assignments, lag updating. Reset a group offset from the UI → it
+      re-consumes from there.
+- [ ] **Phase 28** — Cluster view + failure injection
+      AC: From the UI only — slow a follower and watch it leave the ISR;
+      kill the controller and watch a new one elected; kill a leader
+      mid-produce and watch failover complete. No terminal involved.
