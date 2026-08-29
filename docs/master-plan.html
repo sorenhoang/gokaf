@@ -236,7 +236,7 @@
     <li class="done"><a href="#phase-3">Phase 3 — ApiVersions</a></li>
     <li class="done"><a href="#phase-4">Phase 4 — Metadata</a></li>
     <li class="done"><a href="#phase-5">Phase 5 — CreateTopics</a></li>
-    <li><a href="#phase-6">Phase 6 — Storage engine</a></li>
+    <li class="done"><a href="#phase-6">Phase 6 — Storage engine</a></li>
     <li><a href="#phase-7">Phase 7 — Produce API</a></li>
     <li><a href="#phase-8">Phase 8 — Fetch API</a></li>
     <li><a href="#phase-9">Phase 9 — Offset index</a></li>
@@ -395,7 +395,7 @@
       </dl>
     </div>
 
-    <div class="phase" id="phase-6">
+    <div class="phase done" id="phase-6">
       <h3><span class="phase-id">Phase 6</span> Storage engine — segmented log</h3>
       <dl>
         <dt>Output</dt><dd><code>internal/storage/log.go</code>. Each partition is a directory containing append-only segment files. <code>Append(records []byte) (baseOffset int64, err error)</code> and <code>Read(offset int64, maxBytes int) ([]byte, error)</code> (linear scan, no index yet).</dd>

@@ -26,7 +26,7 @@ not "done." Update this file as phases complete; keep `CLAUDE.md`'s
 - [x] **Phase 5** — CreateTopics / DeleteTopics (key=19/20)
       AC: Create topic "orders" with 3 partitions → Metadata reflects it
       correctly.
-- [ ] **Phase 6** — Storage engine — segmented log
+- [x] **Phase 6** — Storage engine — segmented log
       AC: Append 1000 fake records, read back correctly at arbitrary
       offsets. Restart the process (close/reopen the file) → data survives.
 - [ ] **Phase 7** — Produce API (key=0)
