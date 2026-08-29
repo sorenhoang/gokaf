@@ -9,10 +9,11 @@ type supportedAPI struct {
 }
 
 var supportedAPIs = []supportedAPI{
+	{APIKey: 3, MinVersion: 0, MaxVersion: 0},
 	{APIKey: 18, MinVersion: 0, MaxVersion: 0},
 }
 
-func handleApiVersions(header protocol.RequestHeader, body []byte) ([]byte, error) {
+func (b *Broker) handleApiVersions(header protocol.RequestHeader, body []byte) ([]byte, error) {
 	e := protocol.NewEncoder()
 	e.WriteInt16(0)
 	e.WriteArrayLen(len(supportedAPIs))

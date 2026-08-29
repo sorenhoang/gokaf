@@ -20,7 +20,7 @@ not "done." Update this file as phases complete; keep `CLAUDE.md`'s
 - [x] **Phase 3** — ApiVersions (key=18)
       AC: Test client sends ApiVersionsRequest → correctly parses the
       response.
-- [ ] **Phase 4** — Topic registry + Metadata (key=3)
+- [x] **Phase 4** — Topic registry + Metadata (key=3)
       AC: `MetadataRequest(topics=nil)` returns the correct
       topic/partition/leader list.
 - [ ] **Phase 5** — CreateTopics / DeleteTopics (key=19/20)

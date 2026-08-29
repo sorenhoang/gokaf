@@ -187,6 +187,21 @@
   }
   .limitation strong { color: var(--track-d); }
 
+  .phase.done { border-left-color: #4ade80; }
+  .phase.done h3::after {
+    content: "DONE";
+    font-size: 0.62em;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    color: #4ade80;
+    background: rgba(74,222,128,0.12);
+    border: 1px solid rgba(74,222,128,0.35);
+    padding: 2px 7px;
+    border-radius: 999px;
+  }
+  nav.toc li.done a { color: #4ade80; }
+  nav.toc li.done a::after { content: " \2713"; }
+
   footer {
     margin-top: 60px;
     padding-top: 20px;
@@ -215,11 +230,11 @@
 
   <h2>Track A — Protocol &amp; Core</h2>
   <ul>
-    <li><a href="#phase-0">Phase 0 — TCP skeleton</a></li>
-    <li><a href="#phase-1">Phase 1 — Binary primitives</a></li>
-    <li><a href="#phase-2">Phase 2 — Request dispatch</a></li>
-    <li><a href="#phase-3">Phase 3 — ApiVersions</a></li>
-    <li><a href="#phase-4">Phase 4 — Metadata</a></li>
+    <li class="done"><a href="#phase-0">Phase 0 — TCP skeleton</a></li>
+    <li class="done"><a href="#phase-1">Phase 1 — Binary primitives</a></li>
+    <li class="done"><a href="#phase-2">Phase 2 — Request dispatch</a></li>
+    <li class="done"><a href="#phase-3">Phase 3 — ApiVersions</a></li>
+    <li class="done"><a href="#phase-4">Phase 4 — Metadata</a></li>
     <li><a href="#phase-5">Phase 5 — CreateTopics</a></li>
     <li><a href="#phase-6">Phase 6 — Storage engine</a></li>
     <li><a href="#phase-7">Phase 7 — Produce API</a></li>
@@ -315,7 +330,7 @@
     </div>
     <p class="track-note">The foundation: wire protocol, storage engine, Produce/Fetch. Everything else builds on this.</p>
 
-    <div class="phase" id="phase-0">
+    <div class="phase done" id="phase-0">
       <h3><span class="phase-id">Phase 0</span> TCP skeleton + spec reading</h3>
       <dl>
         <dt>Input</dt><dd>Go 1.22+. Read the Kafka Protocol Guide sections "Preliminaries" and "Wire Format" before writing code.</dd>
@@ -330,7 +345,7 @@
       </dl>
     </div>
 
-    <div class="phase" id="phase-1">
+    <div class="phase done" id="phase-1">
       <h3><span class="phase-id">Phase 1</span> Binary primitive encode/decode</h3>
       <dl>
         <dt>Input</dt><dd>TCP skeleton from Phase 0.</dd>
@@ -343,7 +358,7 @@
       </dl>
     </div>
 
-    <div class="phase" id="phase-2">
+    <div class="phase done" id="phase-2">
       <h3><span class="phase-id">Phase 2</span> Request header parsing + dispatch skeleton</h3>
       <dl>
         <dt>Input</dt><dd>Primitive encode/decode from Phase 1.</dd>
@@ -353,7 +368,7 @@
       </dl>
     </div>
 
-    <div class="phase" id="phase-3">
+    <div class="phase done" id="phase-3">
       <h3><span class="phase-id">Phase 3</span> ApiVersions (key=18)</h3>
       <dl>
         <dt>Output</dt><dd>Handler returns the list of API keys the broker supports with min/max version — the handshake every real client sends first.</dd>
@@ -362,7 +377,7 @@
       </dl>
     </div>
 
-    <div class="phase" id="phase-4">
+    <div class="phase done" id="phase-4">
       <h3><span class="phase-id">Phase 4</span> Topic registry + Metadata (key=3)</h3>
       <dl>
         <dt>Output</dt><dd><code>internal/topic/registry.go</code> — a map of topics guarded by <code>sync.RWMutex</code>; Metadata handler returns cluster info (single broker = itself) plus the topic list (hardcode 1–2 test topics for now).</dd>

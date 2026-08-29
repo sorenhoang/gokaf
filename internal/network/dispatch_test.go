@@ -6,11 +6,13 @@ import (
 	"testing"
 
 	"github.com/sorenhoang/gokaf/internal/protocol"
+	"github.com/sorenhoang/gokaf/internal/topic"
 )
 
 func TestDispatchUnknownAPIWritesCorrelationIDAndErrorCode(t *testing.T) {
 	server, client := net.Pipe()
 	defer client.Close()
+	broker := &Broker{Topics: topic.NewRegistry()}
 
 	req := protocol.NewEncoder()
 	protocol.WriteRequestHeader(req, protocol.RequestHeader{
@@ -23,7 +25,7 @@ func TestDispatchUnknownAPIWritesCorrelationIDAndErrorCode(t *testing.T) {
 	errCh := make(chan error, 1)
 	go func() {
 		defer server.Close()
-		errCh <- Dispatch(server, req.Bytes())
+		errCh <- broker.Dispatch(server, req.Bytes())
 	}()
 
 	respPayload, err := ReadFrame(client)
@@ -56,6 +58,7 @@ func TestDispatchUnknownAPIWritesCorrelationIDAndErrorCode(t *testing.T) {
 func TestDispatchApiVersionsWritesCorrelationIDAndSupportedAPIs(t *testing.T) {
 	server, client := net.Pipe()
 	defer client.Close()
+	broker := &Broker{Topics: topic.NewRegistry()}
 
 	req := protocol.NewEncoder()
 	protocol.WriteRequestHeader(req, protocol.RequestHeader{
@@ -68,7 +71,7 @@ func TestDispatchApiVersionsWritesCorrelationIDAndSupportedAPIs(t *testing.T) {
 	errCh := make(chan error, 1)
 	go func() {
 		defer server.Close()
-		errCh <- Dispatch(server, req.Bytes())
+		errCh <- broker.Dispatch(server, req.Bytes())
 	}()
 
 	respPayload, err := ReadFrame(client)
@@ -101,12 +104,22 @@ func TestDispatchApiVersionsWritesCorrelationIDAndSupportedAPIs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadArrayLen api keys: unexpected error: %v", err)
 	}
-	if apiCount != 1 {
-		t.Fatalf("api key count: got %d, want 1", apiCount)
+	if apiCount != 2 {
+		t.Fatalf("api key count: got %d, want 2", apiCount)
 	}
 
-	apiKey, minVersion, maxVersion := readAPIVersionEntry(t, dec)
-	if apiKey != 18 || minVersion != 0 || maxVersion != 0 {
-		t.Fatalf("api version entry: got {%d, %d, %d}, want {18, 0, 0}", apiKey, minVersion, maxVersion)
+	foundMetadata := false
+	foundApiVersions := false
+	for i := 0; i < apiCount; i++ {
+		apiKey, minVersion, maxVersion := readAPIVersionEntry(t, dec)
+		if apiKey == 3 && minVersion == 0 && maxVersion == 0 {
+			foundMetadata = true
+		}
+		if apiKey == 18 && minVersion == 0 && maxVersion == 0 {
+			foundApiVersions = true
+		}
+	}
+	if !foundMetadata || !foundApiVersions {
+		t.Fatalf("api versions: found_metadata=%t found_api_versions=%t, want both true", foundMetadata, foundApiVersions)
 	}
 }

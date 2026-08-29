@@ -5,10 +5,12 @@ import (
 	"testing"
 
 	"github.com/sorenhoang/gokaf/internal/protocol"
+	"github.com/sorenhoang/gokaf/internal/topic"
 )
 
 func TestHandleApiVersionsWritesV0ResponseBody(t *testing.T) {
-	body, err := handleApiVersions(protocol.RequestHeader{APIKey: 18, APIVersion: 0}, nil)
+	broker := &Broker{Topics: topic.NewRegistry()}
+	body, err := broker.handleApiVersions(protocol.RequestHeader{APIKey: 18, APIVersion: 0}, nil)
 	if err != nil {
 		t.Fatalf("handleApiVersions: unexpected error: %v", err)
 	}
@@ -26,18 +28,28 @@ func TestHandleApiVersionsWritesV0ResponseBody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadArrayLen api keys: unexpected error: %v", err)
 	}
-	if apiCount != 1 {
-		t.Fatalf("api key count: got %d, want 1", apiCount)
+	if apiCount != 2 {
+		t.Fatalf("api key count: got %d, want 2", apiCount)
 	}
 
-	apiKey, minVersion, maxVersion := readAPIVersionEntry(t, dec)
-	if apiKey != 18 || minVersion != 0 || maxVersion != 0 {
-		t.Fatalf("api version entry: got {%d, %d, %d}, want {18, 0, 0}", apiKey, minVersion, maxVersion)
+	foundMetadata := false
+	foundApiVersions := false
+	for i := 0; i < apiCount; i++ {
+		apiKey, minVersion, maxVersion := readAPIVersionEntry(t, dec)
+		if apiKey == 3 && minVersion == 0 && maxVersion == 0 {
+			foundMetadata = true
+		}
+		if apiKey == 18 && minVersion == 0 && maxVersion == 0 {
+			foundApiVersions = true
+		}
+	}
+	if !foundMetadata || !foundApiVersions {
+		t.Fatalf("api versions: found_metadata=%t found_api_versions=%t, want both true", foundMetadata, foundApiVersions)
 	}
 }
 
 func TestApiVersionsHandlerIsRegistered(t *testing.T) {
-	if handlers[18] == nil {
+	if dispatchTable[18] == nil {
 		t.Fatal("ApiVersions handler for api_key 18 is not registered")
 	}
 }

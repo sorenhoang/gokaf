@@ -7,9 +7,30 @@ import (
 	"net"
 
 	"github.com/sorenhoang/gokaf/internal/network"
+	"github.com/sorenhoang/gokaf/internal/topic"
 )
 
 func main() {
+	broker := &network.Broker{
+		NodeID: 1,
+		Host:   "localhost",
+		Port:   9092,
+		Topics: topic.NewRegistry(),
+	}
+	broker.Topics.Add(topic.Topic{
+		Name: "orders",
+		Partitions: []topic.Partition{
+			{ID: 0, Leader: 1, Replicas: []int32{1}, ISR: []int32{1}},
+			{ID: 1, Leader: 1, Replicas: []int32{1}, ISR: []int32{1}},
+		},
+	})
+	broker.Topics.Add(topic.Topic{
+		Name: "payments",
+		Partitions: []topic.Partition{
+			{ID: 0, Leader: 1, Replicas: []int32{1}, ISR: []int32{1}},
+		},
+	})
+
 	listener, err := net.Listen("tcp", ":9092")
 	if err != nil {
 		log.Fatal(err)
@@ -24,11 +45,11 @@ func main() {
 			continue
 		}
 
-		go handleConnection(conn)
+		go handleConnection(broker, conn)
 	}
 }
 
-func handleConnection(conn net.Conn) {
+func handleConnection(broker *network.Broker, conn net.Conn) {
 	defer conn.Close()
 
 	for {
@@ -38,7 +59,7 @@ func handleConnection(conn net.Conn) {
 			return
 		}
 
-		if err := network.Dispatch(conn, payload); err != nil {
+		if err := broker.Dispatch(conn, payload); err != nil {
 			log.Printf("dispatch error from %s: %v", conn.RemoteAddr(), err)
 			return
 		}

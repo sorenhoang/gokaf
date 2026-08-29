@@ -7,15 +7,26 @@ import (
 	"net"
 
 	"github.com/sorenhoang/gokaf/internal/protocol"
+	"github.com/sorenhoang/gokaf/internal/topic"
 )
 
-type HandlerFunc func(header protocol.RequestHeader, body []byte) ([]byte, error)
+// handlerFunc is a method expression: the first argument is the receiver, so
+// the dispatch table can be built once at package load instead of per request.
+type handlerFunc func(*Broker, protocol.RequestHeader, []byte) ([]byte, error)
 
-var handlers = map[int16]HandlerFunc{
-	18: handleApiVersions,
+var dispatchTable = map[int16]handlerFunc{
+	3:  (*Broker).handleMetadata,
+	18: (*Broker).handleApiVersions,
 }
 
-func Dispatch(conn net.Conn, payload []byte) error {
+type Broker struct {
+	NodeID int32
+	Host   string
+	Port   int32
+	Topics *topic.Registry
+}
+
+func (b *Broker) Dispatch(conn net.Conn, payload []byte) error {
 	reader := bytes.NewReader(payload)
 	dec := protocol.NewDecoder(reader)
 
@@ -31,10 +42,10 @@ func Dispatch(conn net.Conn, payload []byte) error {
 		return err
 	}
 
-	handler, ok := handlers[header.APIKey]
+	handler, ok := dispatchTable[header.APIKey]
 	var responseBody []byte
 	if ok {
-		responseBody, err = handler(header, body)
+		responseBody, err = handler(b, header, body)
 		if err != nil {
 			return err
 		}

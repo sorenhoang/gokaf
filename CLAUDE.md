@@ -43,7 +43,7 @@ delegating it to Claude. Behave accordingly:
 
 ## Current status
 
-Phases 0–3 done. Next up: **Phase 4 — Topic registry + Metadata** (Track A).
+Phases 0–4 done. Next up: **Phase 5 — CreateTopics / DeleteTopics** (Track A).
 
 Full checklist with acceptance criteria per phase: [PROGRESS.md](PROGRESS.md).
 Update both this line and the matching checkbox in PROGRESS.md as phases
