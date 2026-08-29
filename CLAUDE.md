@@ -43,7 +43,7 @@ delegating it to Claude. Behave accordingly:
 
 ## Current status
 
-Phases 0–9 done. Next up: **Phase 10 — ListOffsets + full multi-partition support** (Track A).
+Phases 0–10 done. Next up: **Phase 11 — FindCoordinator** (Track B).
 
 Full checklist with acceptance criteria per phase: [PROGRESS.md](PROGRESS.md).
 Update both this line and the matching checkbox in PROGRESS.md as phases

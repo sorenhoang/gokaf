@@ -160,6 +160,16 @@ func (l *Log) EndOffset() int64 {
 	return l.nextOffset
 }
 
+func (l *Log) StartOffset() int64 {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if len(l.segments) == 0 {
+		return 0
+	}
+	return l.segments[0].baseOffset
+}
+
 func (l *Log) Close() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()

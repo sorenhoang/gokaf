@@ -49,6 +49,8 @@ func main() {
 	case "fetch-only":
 		checkMetadataTopic(conn, "orders", true, 1)
 		checkFetch(conn)
+	case "multi-partition":
+		checkMultiPartition(conn)
 	default:
 		log.Fatal("unknown mode: " + *mode)
 	}
@@ -122,18 +124,22 @@ func checkApiVersions(conn net.Conn) {
 		log.Fatal(err)
 	}
 
+	foundListOffsets := false
 	foundApiVersions := false
 	for i := 0; i < apiCount; i++ {
 		apiKey, minVersion, maxVersion := readAPIVersionEntry(dec)
 		log.Printf("api_versions entry: api_key=%d min_version=%d max_version=%d", apiKey, minVersion, maxVersion)
+		if apiKey == 2 && minVersion == 1 && maxVersion == 1 {
+			foundListOffsets = true
+		}
 		if apiKey == 18 && minVersion == 0 && maxVersion == 0 {
 			foundApiVersions = true
 		}
 	}
 
 	log.Printf("api_versions response: correlation_id=%d error_code=%d api_count=%d", respHeader.CorrelationID, errorCode, apiCount)
-	if respHeader.CorrelationID != 43 || errorCode != 0 || !foundApiVersions {
-		log.Fatal("unexpected ApiVersions response: correlation_id=" + strconv.Itoa(int(respHeader.CorrelationID)) + " error_code=" + strconv.Itoa(int(errorCode)) + " found_api_versions=" + strconv.FormatBool(foundApiVersions))
+	if respHeader.CorrelationID != 43 || errorCode != 0 || !foundApiVersions || !foundListOffsets {
+		log.Fatal("unexpected ApiVersions response: correlation_id=" + strconv.Itoa(int(respHeader.CorrelationID)) + " error_code=" + strconv.Itoa(int(errorCode)) + " found_api_versions=" + strconv.FormatBool(foundApiVersions) + " found_list_offsets=" + strconv.FormatBool(foundListOffsets))
 	}
 }
 
@@ -154,6 +160,10 @@ func readAPIVersionEntry(dec *protocol.Decoder) (int16, int16, int16) {
 }
 
 func checkCreateTopics(conn net.Conn, correlationID int32, wantCode int16) {
+	checkCreateTopic(conn, "orders", 3, correlationID, wantCode)
+}
+
+func checkCreateTopic(conn net.Conn, name string, partitions int32, correlationID int32, wantCode int16) {
 	header := protocol.RequestHeader{
 		APIKey:        19,
 		APIVersion:    0,
@@ -164,13 +174,13 @@ func checkCreateTopics(conn net.Conn, correlationID int32, wantCode int16) {
 	e := protocol.NewEncoder()
 	protocol.WriteRequestHeader(e, header)
 	e.WriteArrayLen(1)
-	e.WriteString("orders")
-	e.WriteInt32(3)
+	e.WriteString(name)
+	e.WriteInt32(partitions)
 	e.WriteInt16(1)
 	e.WriteArrayLen(0)
 	e.WriteArrayLen(0)
 	e.WriteInt32(5000)
-	writeAndAssertTopicResult(conn, e.Bytes(), correlationID, "create_topics", "orders", wantCode)
+	writeAndAssertTopicResult(conn, e.Bytes(), correlationID, "create_topics", name, wantCode)
 }
 
 func checkCreateTopicsDuplicate(conn net.Conn) {
@@ -210,6 +220,10 @@ func checkDeleteTopics(conn net.Conn, name string, wantCode int16) {
 }
 
 func checkProduce(conn net.Conn, value string, correlationID int32, wantBaseOffset int64) {
+	checkProduceToPartition(conn, "orders", 0, value, correlationID, wantBaseOffset)
+}
+
+func checkProduceToPartition(conn net.Conn, topic string, partition int32, value string, correlationID int32, wantBaseOffset int64) {
 	batch := buildRecordBatch(value)
 
 	header := protocol.RequestHeader{
@@ -224,9 +238,9 @@ func checkProduce(conn net.Conn, value string, correlationID int32, wantBaseOffs
 	e.WriteInt16(1)
 	e.WriteInt32(5000)
 	e.WriteArrayLen(1)
-	e.WriteString("orders")
+	e.WriteString(topic)
 	e.WriteArrayLen(1)
-	e.WriteInt32(0)
+	e.WriteInt32(partition)
 	e.WriteInt32(int32(len(batch)))
 	request := append(e.Bytes(), batch...)
 
@@ -261,10 +275,10 @@ func checkProduce(conn net.Conn, value string, correlationID int32, wantBaseOffs
 	if err != nil {
 		log.Fatal(fmt.Errorf("read produce partition count: %w", err))
 	}
-	if topicName != "orders" || partitionCount != 1 {
+	if topicName != topic || partitionCount != 1 {
 		log.Fatal("unexpected Produce topic response")
 	}
-	partition, err := dec.ReadInt32()
+	gotPartition, err := dec.ReadInt32()
 	if err != nil {
 		log.Fatal(fmt.Errorf("read produce partition: %w", err))
 	}
@@ -277,17 +291,25 @@ func checkProduce(conn net.Conn, value string, correlationID int32, wantBaseOffs
 		log.Fatal(fmt.Errorf("read produce base_offset: %w", err))
 	}
 
-	log.Printf("produce response: topic=%s partition=%d error_code=%d base_offset=%d", topicName, partition, errorCode, baseOffset)
-	if partition != 0 || errorCode != 0 || baseOffset != wantBaseOffset {
+	log.Printf("produce response: topic=%s partition=%d error_code=%d base_offset=%d", topicName, gotPartition, errorCode, baseOffset)
+	if gotPartition != partition || errorCode != 0 || baseOffset != wantBaseOffset {
 		log.Fatal("unexpected Produce response")
 	}
 }
 
 func checkFetch(conn net.Conn) {
+	want := make([]string, 10)
+	for i := range want {
+		want[i] = fmt.Sprintf("msg-%d", i)
+	}
+	checkFetchFromPartition(conn, "orders", 0, 0, 58, 10, want)
+}
+
+func checkFetchFromPartition(conn net.Conn, topic string, partition int32, offset int64, correlationID int32, wantHighWatermark int64, wantValues []string) {
 	header := protocol.RequestHeader{
 		APIKey:        1,
 		APIVersion:    0,
-		CorrelationID: 58,
+		CorrelationID: correlationID,
 		ClientID:      nil,
 	}
 
@@ -297,10 +319,10 @@ func checkFetch(conn net.Conn) {
 	e.WriteInt32(0)
 	e.WriteInt32(1)
 	e.WriteArrayLen(1)
-	e.WriteString("orders")
+	e.WriteString(topic)
 	e.WriteArrayLen(1)
-	e.WriteInt32(0)
-	e.WriteInt64(0)
+	e.WriteInt32(partition)
+	e.WriteInt64(offset)
 	e.WriteInt32(1 << 20)
 	if err := network.WriteFrame(conn, e.Bytes()); err != nil {
 		log.Fatal(err)
@@ -315,7 +337,7 @@ func checkFetch(conn net.Conn) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	if respHeader.CorrelationID != 58 {
+	if respHeader.CorrelationID != correlationID {
 		log.Fatal("unexpected Fetch correlation_id=" + strconv.Itoa(int(respHeader.CorrelationID)))
 	}
 	topicCount, err := dec.ReadArrayLen()
@@ -333,10 +355,10 @@ func checkFetch(conn net.Conn) {
 	if err != nil {
 		log.Fatal(fmt.Errorf("read fetch partition count: %w", err))
 	}
-	if topicName != "orders" || partitionCount != 1 {
+	if topicName != topic || partitionCount != 1 {
 		log.Fatal("unexpected Fetch topic response")
 	}
-	partition, err := dec.ReadInt32()
+	gotPartition, err := dec.ReadInt32()
 	if err != nil {
 		log.Fatal(fmt.Errorf("read fetch partition: %w", err))
 	}
@@ -353,19 +375,110 @@ func checkFetch(conn net.Conn) {
 		log.Fatal(fmt.Errorf("read fetch records: %w", err))
 	}
 	values := decodeRecordSet(recordSet)
-	log.Printf("fetch response: topic=%s partition=%d error_code=%d high_watermark=%d values=%v", topicName, partition, errorCode, highWatermark, values)
-	if partition != 0 || errorCode != 0 || highWatermark != 10 {
+	log.Printf("fetch response: topic=%s partition=%d error_code=%d high_watermark=%d values=%v", topicName, gotPartition, errorCode, highWatermark, values)
+	if gotPartition != partition || errorCode != 0 || highWatermark != wantHighWatermark {
 		log.Fatal("unexpected Fetch partition response")
 	}
-	if len(values) != 10 {
+	if len(values) != len(wantValues) {
 		log.Fatal("unexpected Fetch value count=" + strconv.Itoa(len(values)))
 	}
 	for i, value := range values {
-		want := fmt.Sprintf("msg-%d", i)
+		want := wantValues[i]
 		if value != want {
 			log.Fatal("unexpected Fetch value at " + strconv.Itoa(i) + ": got " + value + " want " + want)
 		}
 	}
+}
+
+func checkListOffsets(conn net.Conn, topic string, partition int32, timestamp int64, correlationID int32, wantOffset int64) int64 {
+	header := protocol.RequestHeader{
+		APIKey:        2,
+		APIVersion:    1,
+		CorrelationID: correlationID,
+		ClientID:      nil,
+	}
+
+	e := protocol.NewEncoder()
+	protocol.WriteRequestHeader(e, header)
+	e.WriteInt32(-1)
+	e.WriteArrayLen(1)
+	e.WriteString(topic)
+	e.WriteArrayLen(1)
+	e.WriteInt32(partition)
+	e.WriteInt64(timestamp)
+	if err := network.WriteFrame(conn, e.Bytes()); err != nil {
+		log.Fatal(err)
+	}
+
+	respPayload, err := network.ReadFrame(conn)
+	if err != nil {
+		log.Fatal(err)
+	}
+	dec := protocol.NewDecoder(bytes.NewReader(respPayload))
+	respHeader, err := protocol.ReadResponseHeader(dec)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if respHeader.CorrelationID != correlationID {
+		log.Fatal("unexpected ListOffsets correlation_id=" + strconv.Itoa(int(respHeader.CorrelationID)))
+	}
+	topicCount, err := dec.ReadArrayLen()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read list offsets topic count: %w", err))
+	}
+	if topicCount != 1 {
+		log.Fatal("unexpected ListOffsets topic count=" + strconv.Itoa(topicCount))
+	}
+	topicName, err := dec.ReadString()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read list offsets topic name: %w", err))
+	}
+	partitionCount, err := dec.ReadArrayLen()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read list offsets partition count: %w", err))
+	}
+	if topicName != topic || partitionCount != 1 {
+		log.Fatal("unexpected ListOffsets topic response")
+	}
+	gotPartition, err := dec.ReadInt32()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read list offsets partition: %w", err))
+	}
+	errorCode, err := dec.ReadInt16()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read list offsets error_code: %w", err))
+	}
+	gotTimestamp, err := dec.ReadInt64()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read list offsets timestamp: %w", err))
+	}
+	offset, err := dec.ReadInt64()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read list offsets offset: %w", err))
+	}
+	log.Printf("list_offsets response: topic=%s partition=%d error_code=%d timestamp=%d offset=%d", topicName, gotPartition, errorCode, gotTimestamp, offset)
+	if gotPartition != partition || errorCode != 0 || gotTimestamp != -1 || offset != wantOffset {
+		log.Fatal("unexpected ListOffsets response")
+	}
+	return offset
+}
+
+func checkMultiPartition(conn net.Conn) {
+	checkCreateTopic(conn, "events", 3, 80, 0)
+	checkProduceToPartition(conn, "events", 0, "a", 81, 0)
+	checkProduceToPartition(conn, "events", 0, "b", 82, 1)
+	checkProduceToPartition(conn, "events", 1, "c", 83, 0)
+	checkProduceToPartition(conn, "events", 2, "d", 84, 0)
+	checkProduceToPartition(conn, "events", 2, "e", 85, 1)
+	checkProduceToPartition(conn, "events", 2, "f", 86, 2)
+
+	checkListOffsets(conn, "events", 1, -1, 87, 1)
+	checkListOffsets(conn, "events", 2, -1, 88, 3)
+	checkListOffsets(conn, "events", 0, -2, 89, 0)
+	p2Start := checkListOffsets(conn, "events", 2, -2, 90, 0)
+
+	checkFetchFromPartition(conn, "events", 2, p2Start, 91, 3, []string{"d", "e", "f"})
+	checkFetchFromPartition(conn, "events", 1, 0, 92, 1, []string{"c"})
 }
 
 func writeAndAssertTopicResult(conn net.Conn, request []byte, correlationID int32, label string, wantName string, wantCode int16) {

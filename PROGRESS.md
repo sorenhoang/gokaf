@@ -40,7 +40,7 @@ not "done." Update this file as phases complete; keep `CLAUDE.md`'s
       AC: Generate enough data to produce 2+ segments; Fetch from a later
       segment returns correct data. Benchmark shows lookup is meaningfully
       faster than the Phase 6 linear scan.
-- [ ] **Phase 10** — ListOffsets (key=2) + full multi-partition support
+- [x] **Phase 10** — ListOffsets (key=2) + full multi-partition support
       AC: Test client uses ListOffsets to compute where to start fetching
       from, like a real consumer would, verified on a multi-partition topic.
 

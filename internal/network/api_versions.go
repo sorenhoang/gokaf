@@ -11,6 +11,7 @@ type supportedAPI struct {
 var supportedAPIs = []supportedAPI{
 	{APIKey: 0, MinVersion: 0, MaxVersion: 0},
 	{APIKey: 1, MinVersion: 0, MaxVersion: 0},
+	{APIKey: 2, MinVersion: 1, MaxVersion: 1},
 	{APIKey: 3, MinVersion: 0, MaxVersion: 0},
 	{APIKey: 18, MinVersion: 0, MaxVersion: 0},
 	{APIKey: 19, MinVersion: 0, MaxVersion: 0},
