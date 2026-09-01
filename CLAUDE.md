@@ -44,7 +44,7 @@ delegating it to Claude. Behave accordingly:
 
 ## Current status
 
-Phases 0–10 done. Next up: **Phase 11 — FindCoordinator** (Track B).
+Phases 0–11 done. Next up: **Phase 12 — JoinGroup / SyncGroup + state machine** (Track B).
 
 Full checklist with acceptance criteria per phase: [PROGRESS.md](PROGRESS.md).
 Update both this line and the matching checkbox in PROGRESS.md as phases

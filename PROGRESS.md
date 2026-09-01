@@ -46,7 +46,7 @@ not "done." Update this file as phases complete; keep `CLAUDE.md`'s
 
 ## Track B — Consumer Group (Phases 11–15)
 
-- [ ] **Phase 11** — FindCoordinator (key=10)
+- [x] **Phase 11** — FindCoordinator (key=10)
       AC: Correct broker info returned for any group_id.
 - [ ] **Phase 12** — JoinGroup / SyncGroup (key=11/14) + state machine
       AC: 2–3 simulated consumers in the same group → one is elected

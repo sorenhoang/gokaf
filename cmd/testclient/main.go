@@ -16,7 +16,7 @@ import (
 )
 
 func main() {
-	mode := flag.String("mode", "full", "test mode: full, produce-fetch, fetch-only")
+	mode := flag.String("mode", "full", "test mode: full, produce-fetch, fetch-only, multi-partition, find-coordinator")
 	flag.Parse()
 
 	conn, err := net.Dial("tcp", "localhost:9092")
@@ -51,6 +51,9 @@ func main() {
 		checkFetch(conn)
 	case "multi-partition":
 		checkMultiPartition(conn)
+	case "find-coordinator":
+		checkFindCoordinator(conn, "group-a", 100)
+		checkFindCoordinator(conn, "anything", 101)
 	default:
 		log.Fatal("unknown mode: " + *mode)
 	}
@@ -126,11 +129,15 @@ func checkApiVersions(conn net.Conn) {
 
 	foundListOffsets := false
 	foundApiVersions := false
+	foundFindCoordinator := false
 	for i := 0; i < apiCount; i++ {
 		apiKey, minVersion, maxVersion := readAPIVersionEntry(dec)
 		log.Printf("api_versions entry: api_key=%d min_version=%d max_version=%d", apiKey, minVersion, maxVersion)
 		if apiKey == 2 && minVersion == 1 && maxVersion == 1 {
 			foundListOffsets = true
+		}
+		if apiKey == 10 && minVersion == 0 && maxVersion == 0 {
+			foundFindCoordinator = true
 		}
 		if apiKey == 18 && minVersion == 0 && maxVersion == 0 {
 			foundApiVersions = true
@@ -138,8 +145,56 @@ func checkApiVersions(conn net.Conn) {
 	}
 
 	log.Printf("api_versions response: correlation_id=%d error_code=%d api_count=%d", respHeader.CorrelationID, errorCode, apiCount)
-	if respHeader.CorrelationID != 43 || errorCode != 0 || !foundApiVersions || !foundListOffsets {
-		log.Fatal("unexpected ApiVersions response: correlation_id=" + strconv.Itoa(int(respHeader.CorrelationID)) + " error_code=" + strconv.Itoa(int(errorCode)) + " found_api_versions=" + strconv.FormatBool(foundApiVersions) + " found_list_offsets=" + strconv.FormatBool(foundListOffsets))
+	if respHeader.CorrelationID != 43 || errorCode != 0 || !foundApiVersions || !foundListOffsets || !foundFindCoordinator {
+		log.Fatal("unexpected ApiVersions response: correlation_id=" + strconv.Itoa(int(respHeader.CorrelationID)) + " error_code=" + strconv.Itoa(int(errorCode)) + " found_api_versions=" + strconv.FormatBool(foundApiVersions) + " found_list_offsets=" + strconv.FormatBool(foundListOffsets) + " found_find_coordinator=" + strconv.FormatBool(foundFindCoordinator))
+	}
+}
+
+func checkFindCoordinator(conn net.Conn, groupID string, correlationID int32) {
+	header := protocol.RequestHeader{
+		APIKey:        10,
+		APIVersion:    0,
+		CorrelationID: correlationID,
+		ClientID:      nil,
+	}
+
+	e := protocol.NewEncoder()
+	protocol.WriteRequestHeader(e, header)
+	e.WriteString(groupID)
+	if err := network.WriteFrame(conn, e.Bytes()); err != nil {
+		log.Fatal(err)
+	}
+
+	respPayload, err := network.ReadFrame(conn)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	dec := protocol.NewDecoder(bytes.NewReader(respPayload))
+	respHeader, err := protocol.ReadResponseHeader(dec)
+	if err != nil {
+		log.Fatal(err)
+	}
+	errorCode, err := dec.ReadInt16()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read find_coordinator error_code: %w", err))
+	}
+	nodeID, err := dec.ReadInt32()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read find_coordinator node_id: %w", err))
+	}
+	host, err := dec.ReadString()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read find_coordinator host: %w", err))
+	}
+	port, err := dec.ReadInt32()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read find_coordinator port: %w", err))
+	}
+
+	log.Printf("find_coordinator response: group_id=%s correlation_id=%d error_code=%d node_id=%d host=%s port=%d", groupID, respHeader.CorrelationID, errorCode, nodeID, host, port)
+	if respHeader.CorrelationID != correlationID || errorCode != 0 || nodeID != 1 || host != "localhost" || port != 9092 {
+		log.Fatal("unexpected FindCoordinator response")
 	}
 }
 

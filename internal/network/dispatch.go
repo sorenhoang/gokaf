@@ -20,6 +20,7 @@ var dispatchTable = map[int16]handlerFunc{
 	1:  (*Broker).handleFetch,
 	2:  (*Broker).handleListOffsets,
 	3:  (*Broker).handleMetadata,
+	10: (*Broker).handleFindCoordinator,
 	18: (*Broker).handleApiVersions,
 	19: (*Broker).handleCreateTopics,
 	20: (*Broker).handleDeleteTopics,

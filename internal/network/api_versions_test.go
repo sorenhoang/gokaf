@@ -28,14 +28,15 @@ func TestHandleApiVersionsWritesV0ResponseBody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadArrayLen api keys: unexpected error: %v", err)
 	}
-	if apiCount != 7 {
-		t.Fatalf("api key count: got %d, want 7", apiCount)
+	if apiCount != 8 {
+		t.Fatalf("api key count: got %d, want 8", apiCount)
 	}
 
 	foundProduce := false
 	foundFetch := false
 	foundListOffsets := false
 	foundMetadata := false
+	foundFindCoordinator := false
 	foundApiVersions := false
 	foundCreateTopics := false
 	foundDeleteTopics := false
@@ -53,6 +54,9 @@ func TestHandleApiVersionsWritesV0ResponseBody(t *testing.T) {
 		if apiKey == 3 && minVersion == 0 && maxVersion == 0 {
 			foundMetadata = true
 		}
+		if apiKey == 10 && minVersion == 0 && maxVersion == 0 {
+			foundFindCoordinator = true
+		}
 		if apiKey == 18 && minVersion == 0 && maxVersion == 0 {
 			foundApiVersions = true
 		}
@@ -63,9 +67,9 @@ func TestHandleApiVersionsWritesV0ResponseBody(t *testing.T) {
 			foundDeleteTopics = true
 		}
 	}
-	if !foundProduce || !foundFetch || !foundListOffsets || !foundMetadata || !foundApiVersions || !foundCreateTopics || !foundDeleteTopics {
-		t.Fatalf("api versions: found_produce=%t found_fetch=%t found_list_offsets=%t found_metadata=%t found_api_versions=%t found_create_topics=%t found_delete_topics=%t, want all true",
-			foundProduce, foundFetch, foundListOffsets, foundMetadata, foundApiVersions, foundCreateTopics, foundDeleteTopics)
+	if !foundProduce || !foundFetch || !foundListOffsets || !foundMetadata || !foundFindCoordinator || !foundApiVersions || !foundCreateTopics || !foundDeleteTopics {
+		t.Fatalf("api versions: found_produce=%t found_fetch=%t found_list_offsets=%t found_metadata=%t found_find_coordinator=%t found_api_versions=%t found_create_topics=%t found_delete_topics=%t, want all true",
+			foundProduce, foundFetch, foundListOffsets, foundMetadata, foundFindCoordinator, foundApiVersions, foundCreateTopics, foundDeleteTopics)
 	}
 }
 
