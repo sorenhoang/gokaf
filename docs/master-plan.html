@@ -248,7 +248,7 @@
 
   <h2>Track B — Consumer Group</h2>
   <ul>
-    <li><a href="#phase-11">Phase 11 — FindCoordinator</a></li>
+    <li class="done"><a href="#phase-11">Phase 11 — FindCoordinator</a></li>
     <li><a href="#phase-12">Phase 12 — JoinGroup/SyncGroup</a></li>
     <li><a href="#phase-13">Phase 13 — Heartbeat/LeaveGroup</a></li>
     <li><a href="#phase-14">Phase 14 — Offset commit/fetch</a></li>
@@ -463,7 +463,7 @@
     </div>
     <p class="track-note">Group coordination protocol: how consumers discover each other, split partitions, and track progress.</p>
 
-    <div class="phase" id="phase-11">
+    <div class="phase done" id="phase-11">
       <h3><span class="phase-id">Phase 11</span> FindCoordinator (key=10)</h3>
       <dl>
         <dt>Output</dt><dd>Single-broker setup, so the coordinator is always this broker. Returns broker info as coordinator for a given group_id.</dd>
