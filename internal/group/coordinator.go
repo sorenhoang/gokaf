@@ -72,6 +72,17 @@ type SyncResult struct {
 	ErrorCode  int16
 }
 
+type HeartbeatRequest struct {
+	GroupID      string
+	GenerationID int32
+	MemberID     string
+}
+
+type LeaveRequest struct {
+	GroupID  string
+	MemberID string
+}
+
 type Coordinator struct {
 	mu             sync.Mutex
 	groups         map[string]*Group
@@ -98,6 +109,7 @@ type Member struct {
 	SessionTimeoutMS int32
 	awaitJoin        chan JoinResult
 	awaitSync        chan SyncResult
+	sessionTimer     *time.Timer
 }
 
 func NewCoordinator(rebalanceDelay time.Duration) *Coordinator {
@@ -126,6 +138,7 @@ func (c *Coordinator) Join(req JoinRequest) JoinResult {
 	member.Metadata = firstProtocolMetadata(req.Protocols)
 	member.awaitJoin = make(chan JoinResult, 1)
 	member.awaitSync = make(chan SyncResult, 1)
+	c.stopSessionTimer(member)
 
 	if group.State != PreparingRebalance {
 		group.State = PreparingRebalance
@@ -163,6 +176,9 @@ func (c *Coordinator) Sync(req SyncRequest) SyncResult {
 			}
 		}
 		group.State = Stable
+		for _, active := range group.Members {
+			c.touch(group.ID, active)
+		}
 		for _, waiting := range group.Members {
 			if waiting.ID == member.ID {
 				continue
@@ -178,12 +194,14 @@ func (c *Coordinator) Sync(req SyncRequest) SyncResult {
 	}
 
 	if group.State == Stable {
+		c.touch(group.ID, member)
 		result := SyncResult{Assignment: cloneBytes(member.Assignment), ErrorCode: protocol.ErrNone}
 		c.mu.Unlock()
 		return result
 	}
 
 	ch := member.awaitSync
+	c.touch(group.ID, member)
 	c.mu.Unlock()
 	return <-ch
 }
@@ -197,6 +215,48 @@ func (c *Coordinator) State(groupID string) GroupState {
 		return Empty
 	}
 	return group.State
+}
+
+func (c *Coordinator) Heartbeat(req HeartbeatRequest) int16 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	group, ok := c.groups[req.GroupID]
+	if !ok {
+		return protocol.ErrUnknownMemberID
+	}
+	member, ok := group.Members[req.MemberID]
+	if !ok {
+		return protocol.ErrUnknownMemberID
+	}
+	if group.State == PreparingRebalance {
+		return protocol.ErrRebalanceInProgress
+	}
+	if req.GenerationID != group.GenerationID {
+		return protocol.ErrIllegalGeneration
+	}
+
+	c.touch(req.GroupID, member)
+	return protocol.ErrNone
+}
+
+func (c *Coordinator) Leave(req LeaveRequest) int16 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	group, ok := c.groups[req.GroupID]
+	if !ok {
+		return protocol.ErrUnknownMemberID
+	}
+	member, ok := group.Members[req.MemberID]
+	if !ok {
+		return protocol.ErrUnknownMemberID
+	}
+
+	c.removeMember(group, req.MemberID)
+	c.stopSessionTimer(member)
+	c.maybeRebalance(group)
+	return protocol.ErrNone
 }
 
 func (c *Coordinator) completeJoin(groupID string) {
@@ -215,6 +275,7 @@ func (c *Coordinator) completeJoin(groupID string) {
 	leaderMembers := make([]JoinMember, 0, len(group.JoinOrder))
 	for _, memberID := range group.JoinOrder {
 		member := group.Members[memberID]
+		c.touch(group.ID, member)
 		leaderMembers = append(leaderMembers, JoinMember{ID: member.ID, Metadata: cloneBytes(member.Metadata)})
 	}
 
@@ -254,6 +315,82 @@ func (c *Coordinator) getOrCreateGroup(groupID string) *Group {
 	}
 	c.groups[groupID] = group
 	return group
+}
+
+func (c *Coordinator) touch(groupID string, member *Member) {
+	timeout := member.SessionTimeoutMS
+	if timeout < 100 {
+		// ponytail: real brokers validate session.timeout.ms against configured
+		// min/max bounds. Clamp only to keep tiny test values from hot-looping.
+		timeout = 100
+	}
+	d := time.Duration(timeout) * time.Millisecond
+	if member.sessionTimer == nil {
+		memberID := member.ID
+		member.sessionTimer = time.AfterFunc(d, func() {
+			c.expireMember(groupID, memberID)
+		})
+		return
+	}
+	member.sessionTimer.Reset(d)
+}
+
+func (c *Coordinator) expireMember(groupID string, memberID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	group, ok := c.groups[groupID]
+	if !ok {
+		return
+	}
+	member, ok := group.Members[memberID]
+	if !ok {
+		return
+	}
+	c.removeMember(group, memberID)
+	c.stopSessionTimer(member)
+	c.maybeRebalance(group)
+}
+
+func (c *Coordinator) removeMember(group *Group, memberID string) {
+	delete(group.Members, memberID)
+	joinOrder := group.JoinOrder[:0]
+	for _, id := range group.JoinOrder {
+		if id != memberID {
+			joinOrder = append(joinOrder, id)
+		}
+	}
+	group.JoinOrder = joinOrder
+	if group.LeaderID == memberID {
+		group.LeaderID = ""
+	}
+}
+
+func (c *Coordinator) stopSessionTimer(member *Member) {
+	if member.sessionTimer == nil {
+		return
+	}
+	member.sessionTimer.Stop()
+	member.sessionTimer = nil
+}
+
+func (c *Coordinator) maybeRebalance(group *Group) {
+	if len(group.Members) == 0 {
+		group.State = Empty
+		group.LeaderID = ""
+		group.Protocol = ""
+		return
+	}
+	if group.State != Stable && group.State != CompletingRebalance {
+		return
+	}
+	group.State = PreparingRebalance
+	if group.joinTimer != nil {
+		group.joinTimer.Stop()
+	}
+	group.joinTimer = time.AfterFunc(c.rebalanceDelay, func() {
+		c.completeJoin(group.ID)
+	})
 }
 
 func (c *Coordinator) nextMemberID(clientID string) string {

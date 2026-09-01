@@ -153,13 +153,136 @@ func TestSyncRejectsUnknownMemberAndIllegalGeneration(t *testing.T) {
 	}
 }
 
+func TestSessionTimeoutEvictsLastMemberAndLeavesGroupEmpty(t *testing.T) {
+	coordinator := NewCoordinator(time.Millisecond)
+	member := joinOneMember(t, coordinator, 120*time.Millisecond)
+	stabilizeSingleMember(t, coordinator, member, []byte("assign-a"))
+
+	time.Sleep(180 * time.Millisecond)
+
+	if state := coordinator.State("orders-consumers"); state != Empty {
+		t.Fatalf("group state: got %s, want %s", state, Empty)
+	}
+	if coordinator.hasMember("orders-consumers", member.MemberID) {
+		t.Fatalf("expired member %q still exists", member.MemberID)
+	}
+}
+
+func TestHeartbeatKeepsMemberSessionAlive(t *testing.T) {
+	coordinator := NewCoordinator(time.Millisecond)
+	member := joinOneMember(t, coordinator, 150*time.Millisecond)
+	stabilizeSingleMember(t, coordinator, member, []byte("assign-a"))
+
+	time.Sleep(90 * time.Millisecond)
+	if code := coordinator.Heartbeat(HeartbeatRequest{
+		GroupID:      "orders-consumers",
+		GenerationID: member.GenerationID,
+		MemberID:     member.MemberID,
+	}); code != protocol.ErrNone {
+		t.Fatalf("heartbeat error code: got %d, want 0", code)
+	}
+	time.Sleep(90 * time.Millisecond)
+
+	if !coordinator.hasMember("orders-consumers", member.MemberID) {
+		t.Fatalf("member %q expired even though heartbeat reset the session", member.MemberID)
+	}
+}
+
+func TestExpiringOneStableMemberStartsRebalanceForSurvivor(t *testing.T) {
+	coordinator := NewCoordinator(10 * time.Millisecond)
+	first, second := joinTwoMembersWithTimeouts(t, coordinator, 500*time.Millisecond, 120*time.Millisecond)
+	stabilizeTwoMembers(t, coordinator, first, second)
+
+	coordinator.setRebalanceDelayForTest(100 * time.Millisecond)
+	time.Sleep(180 * time.Millisecond)
+
+	if coordinator.hasMember("orders-consumers", second.MemberID) {
+		t.Fatalf("expired member %q still exists", second.MemberID)
+	}
+	if state := coordinator.State("orders-consumers"); state != PreparingRebalance {
+		t.Fatalf("group state: got %s, want %s", state, PreparingRebalance)
+	}
+	if code := coordinator.Heartbeat(HeartbeatRequest{
+		GroupID:      "orders-consumers",
+		GenerationID: first.GenerationID,
+		MemberID:     first.MemberID,
+	}); code != protocol.ErrRebalanceInProgress {
+		t.Fatalf("survivor heartbeat error code: got %d, want %d", code, protocol.ErrRebalanceInProgress)
+	}
+}
+
+func TestHeartbeatReturnsUnknownMemberRebalanceAndIllegalGeneration(t *testing.T) {
+	coordinator := NewCoordinator(10 * time.Millisecond)
+	first, second := joinTwoMembersWithTimeouts(t, coordinator, 500*time.Millisecond, 500*time.Millisecond)
+	stabilizeTwoMembers(t, coordinator, first, second)
+
+	unknown := coordinator.Heartbeat(HeartbeatRequest{
+		GroupID:      "orders-consumers",
+		GenerationID: first.GenerationID,
+		MemberID:     "missing",
+	})
+	if unknown != protocol.ErrUnknownMemberID {
+		t.Fatalf("unknown heartbeat code: got %d, want %d", unknown, protocol.ErrUnknownMemberID)
+	}
+
+	coordinator.setRebalanceDelayForTest(100 * time.Millisecond)
+	coordinator.Leave(LeaveRequest{GroupID: "orders-consumers", MemberID: second.MemberID})
+	rebalancing := coordinator.Heartbeat(HeartbeatRequest{
+		GroupID:      "orders-consumers",
+		GenerationID: first.GenerationID,
+		MemberID:     first.MemberID,
+	})
+	if rebalancing != protocol.ErrRebalanceInProgress {
+		t.Fatalf("rebalancing heartbeat code: got %d, want %d", rebalancing, protocol.ErrRebalanceInProgress)
+	}
+
+	next := receiveJoin(t, joinAsync(coordinator, JoinRequest{
+		GroupID:          "orders-consumers",
+		ClientID:         "client-a",
+		SessionTimeoutMS: 500,
+		MemberID:         first.MemberID,
+		ProtocolType:     "consumer",
+		Protocols:        []Protocol{{Name: "range", Metadata: []byte("sub-a")}},
+	}))
+	stale := coordinator.Heartbeat(HeartbeatRequest{
+		GroupID:      "orders-consumers",
+		GenerationID: first.GenerationID,
+		MemberID:     first.MemberID,
+	})
+	if next.GenerationID != 2 || stale != protocol.ErrIllegalGeneration {
+		t.Fatalf("stale heartbeat: next_generation=%d code=%d, want generation=2 code=%d", next.GenerationID, stale, protocol.ErrIllegalGeneration)
+	}
+}
+
+func TestLeaveRemovesMemberAndStartsRebalance(t *testing.T) {
+	coordinator := NewCoordinator(10 * time.Millisecond)
+	first, second := joinTwoMembersWithTimeouts(t, coordinator, 500*time.Millisecond, 500*time.Millisecond)
+	stabilizeTwoMembers(t, coordinator, first, second)
+
+	coordinator.setRebalanceDelayForTest(100 * time.Millisecond)
+	if code := coordinator.Leave(LeaveRequest{GroupID: "orders-consumers", MemberID: second.MemberID}); code != protocol.ErrNone {
+		t.Fatalf("leave error code: got %d, want 0", code)
+	}
+
+	if coordinator.hasMember("orders-consumers", second.MemberID) {
+		t.Fatalf("left member %q still exists", second.MemberID)
+	}
+	if state := coordinator.State("orders-consumers"); state != PreparingRebalance {
+		t.Fatalf("group state: got %s, want %s", state, PreparingRebalance)
+	}
+}
+
 func joinTwoMembers(t *testing.T, coordinator *Coordinator) (JoinResult, JoinResult) {
 	t.Helper()
+	return joinTwoMembersWithTimeouts(t, coordinator, 30*time.Second, 30*time.Second)
+}
 
+func joinTwoMembersWithTimeouts(t *testing.T, coordinator *Coordinator, firstTimeout time.Duration, secondTimeout time.Duration) (JoinResult, JoinResult) {
+	t.Helper()
 	firstCh := joinAsync(coordinator, JoinRequest{
 		GroupID:          "orders-consumers",
 		ClientID:         "client-a",
-		SessionTimeoutMS: 30000,
+		SessionTimeoutMS: int32(firstTimeout / time.Millisecond),
 		MemberID:         "",
 		ProtocolType:     "consumer",
 		Protocols:        []Protocol{{Name: "range", Metadata: []byte("sub-a")}},
@@ -168,13 +291,75 @@ func joinTwoMembers(t *testing.T, coordinator *Coordinator) (JoinResult, JoinRes
 	secondCh := joinAsync(coordinator, JoinRequest{
 		GroupID:          "orders-consumers",
 		ClientID:         "client-b",
-		SessionTimeoutMS: 30000,
+		SessionTimeoutMS: int32(secondTimeout / time.Millisecond),
 		MemberID:         "",
 		ProtocolType:     "consumer",
 		Protocols:        []Protocol{{Name: "range", Metadata: []byte("sub-b")}},
 	})
 
 	return receiveJoin(t, firstCh), receiveJoin(t, secondCh)
+}
+
+func joinOneMember(t *testing.T, coordinator *Coordinator, timeout time.Duration) JoinResult {
+	t.Helper()
+
+	return receiveJoin(t, joinAsync(coordinator, JoinRequest{
+		GroupID:          "orders-consumers",
+		ClientID:         "client-a",
+		SessionTimeoutMS: int32(timeout / time.Millisecond),
+		MemberID:         "",
+		ProtocolType:     "consumer",
+		Protocols:        []Protocol{{Name: "range", Metadata: []byte("sub-a")}},
+	}))
+}
+
+func stabilizeSingleMember(t *testing.T, coordinator *Coordinator, member JoinResult, assignment []byte) {
+	t.Helper()
+
+	result := coordinator.Sync(SyncRequest{
+		GroupID:      "orders-consumers",
+		GenerationID: member.GenerationID,
+		MemberID:     member.MemberID,
+		Assignments:  map[string][]byte{member.MemberID: assignment},
+	})
+	if result.ErrorCode != protocol.ErrNone {
+		t.Fatalf("sync error code: got %d, want 0", result.ErrorCode)
+	}
+}
+
+func stabilizeTwoMembers(t *testing.T, coordinator *Coordinator, first JoinResult, second JoinResult) {
+	t.Helper()
+
+	result := coordinator.Sync(SyncRequest{
+		GroupID:      "orders-consumers",
+		GenerationID: first.GenerationID,
+		MemberID:     first.LeaderID,
+		Assignments: map[string][]byte{
+			first.MemberID:  []byte("assign-a"),
+			second.MemberID: []byte("assign-b"),
+		},
+	})
+	if result.ErrorCode != protocol.ErrNone {
+		t.Fatalf("sync error code: got %d, want 0", result.ErrorCode)
+	}
+}
+
+func (c *Coordinator) setRebalanceDelayForTest(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.rebalanceDelay = d
+}
+
+func (c *Coordinator) hasMember(groupID string, memberID string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	group, ok := c.groups[groupID]
+	if !ok {
+		return false
+	}
+	_, ok = group.Members[memberID]
+	return ok
 }
 
 func joinAsync(coordinator *Coordinator, req JoinRequest) <-chan JoinResult {
@@ -199,7 +384,7 @@ func receiveJoin(t *testing.T, ch <-chan JoinResult) JoinResult {
 	select {
 	case result := <-ch:
 		return result
-	case <-time.After(100 * time.Millisecond):
+	case <-time.After(500 * time.Millisecond):
 		t.Fatal("timed out waiting for Join")
 		return JoinResult{}
 	}
@@ -211,7 +396,7 @@ func receiveSync(t *testing.T, ch <-chan SyncResult) SyncResult {
 	select {
 	case result := <-ch:
 		return result
-	case <-time.After(100 * time.Millisecond):
+	case <-time.After(500 * time.Millisecond):
 		t.Fatal("timed out waiting for Sync")
 		return SyncResult{}
 	}

@@ -11,4 +11,5 @@ const (
 	ErrInvalidReplicationFactor int16 = 38
 	ErrIllegalGeneration        int16 = 22
 	ErrUnknownMemberID          int16 = 25
+	ErrRebalanceInProgress      int16 = 27
 )

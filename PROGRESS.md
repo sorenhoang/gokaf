@@ -51,7 +51,7 @@ not "done." Update this file as phases complete; keep `CLAUDE.md`'s
 - [x] **Phase 12** — JoinGroup / SyncGroup (key=11/14) + state machine
       AC: 2–3 simulated consumers in the same group → one is elected
       leader → SyncGroup assigns partitions with no overlap and no gaps.
-- [ ] **Phase 13** — Heartbeat / LeaveGroup (key=12/13) + session timeout
+- [x] **Phase 13** — Heartbeat / LeaveGroup (key=12/13) + session timeout
       AC: Simulate one member crashing (stop sending heartbeats) → after
       the timeout, the coordinator rebalances and the remaining members
       pick up its partitions.

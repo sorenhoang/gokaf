@@ -250,7 +250,7 @@
   <ul>
     <li class="done"><a href="#phase-11">Phase 11 — FindCoordinator</a></li>
     <li class="done"><a href="#phase-12">Phase 12 — JoinGroup/SyncGroup</a></li>
-    <li><a href="#phase-13">Phase 13 — Heartbeat/LeaveGroup</a></li>
+    <li class="done"><a href="#phase-13">Phase 13 — Heartbeat/LeaveGroup</a></li>
     <li><a href="#phase-14">Phase 14 — Offset commit/fetch</a></li>
     <li><a href="#phase-15">Phase 15 — Real assignors</a></li>
   </ul>
@@ -481,7 +481,7 @@
       </dl>
     </div>
 
-    <div class="phase" id="phase-13">
+    <div class="phase done" id="phase-13">
       <h3><span class="phase-id">Phase 13</span> Heartbeat / LeaveGroup (key=12/13) + session timeout</h3>
       <dl>
         <dt>Output</dt><dd>Heartbeat resets a per-member timer. No heartbeat within <code>session.timeout.ms</code> → coordinator evicts the member and triggers a rebalance.</dd>

@@ -17,7 +17,7 @@ import (
 )
 
 func main() {
-	mode := flag.String("mode", "full", "test mode: full, produce-fetch, fetch-only, multi-partition, find-coordinator, consumer-group")
+	mode := flag.String("mode", "full", "test mode: full, produce-fetch, fetch-only, multi-partition, find-coordinator, consumer-group, consumer-group-rebalance")
 	flag.Parse()
 
 	conn, err := net.Dial("tcp", "localhost:9092")
@@ -57,6 +57,8 @@ func main() {
 		checkFindCoordinator(conn, "anything", 101)
 	case "consumer-group":
 		checkConsumerGroup(conn)
+	case "consumer-group-rebalance":
+		checkConsumerGroupRebalance(conn)
 	default:
 		log.Fatal("unknown mode: " + *mode)
 	}
@@ -134,6 +136,8 @@ func checkApiVersions(conn net.Conn) {
 	foundApiVersions := false
 	foundFindCoordinator := false
 	foundJoinGroup := false
+	foundHeartbeat := false
+	foundLeaveGroup := false
 	foundSyncGroup := false
 	for i := 0; i < apiCount; i++ {
 		apiKey, minVersion, maxVersion := readAPIVersionEntry(dec)
@@ -147,6 +151,12 @@ func checkApiVersions(conn net.Conn) {
 		if apiKey == 11 && minVersion == 0 && maxVersion == 0 {
 			foundJoinGroup = true
 		}
+		if apiKey == 12 && minVersion == 0 && maxVersion == 0 {
+			foundHeartbeat = true
+		}
+		if apiKey == 13 && minVersion == 0 && maxVersion == 0 {
+			foundLeaveGroup = true
+		}
 		if apiKey == 14 && minVersion == 0 && maxVersion == 0 {
 			foundSyncGroup = true
 		}
@@ -156,8 +166,8 @@ func checkApiVersions(conn net.Conn) {
 	}
 
 	log.Printf("api_versions response: correlation_id=%d error_code=%d api_count=%d", respHeader.CorrelationID, errorCode, apiCount)
-	if respHeader.CorrelationID != 43 || errorCode != 0 || !foundApiVersions || !foundListOffsets || !foundFindCoordinator || !foundJoinGroup || !foundSyncGroup {
-		log.Fatal("unexpected ApiVersions response: correlation_id=" + strconv.Itoa(int(respHeader.CorrelationID)) + " error_code=" + strconv.Itoa(int(errorCode)) + " found_api_versions=" + strconv.FormatBool(foundApiVersions) + " found_list_offsets=" + strconv.FormatBool(foundListOffsets) + " found_find_coordinator=" + strconv.FormatBool(foundFindCoordinator) + " found_join_group=" + strconv.FormatBool(foundJoinGroup) + " found_sync_group=" + strconv.FormatBool(foundSyncGroup))
+	if respHeader.CorrelationID != 43 || errorCode != 0 || !foundApiVersions || !foundListOffsets || !foundFindCoordinator || !foundJoinGroup || !foundHeartbeat || !foundLeaveGroup || !foundSyncGroup {
+		log.Fatal("unexpected ApiVersions response: correlation_id=" + strconv.Itoa(int(respHeader.CorrelationID)) + " error_code=" + strconv.Itoa(int(errorCode)) + " found_api_versions=" + strconv.FormatBool(foundApiVersions) + " found_list_offsets=" + strconv.FormatBool(foundListOffsets) + " found_find_coordinator=" + strconv.FormatBool(foundFindCoordinator) + " found_join_group=" + strconv.FormatBool(foundJoinGroup) + " found_heartbeat=" + strconv.FormatBool(foundHeartbeat) + " found_leave_group=" + strconv.FormatBool(foundLeaveGroup) + " found_sync_group=" + strconv.FormatBool(foundSyncGroup))
 	}
 }
 
@@ -277,15 +287,159 @@ func checkConsumerGroup(conn net.Conn) {
 	}, topicName, 3)
 }
 
+func checkConsumerGroupRebalance(conn net.Conn) {
+	deadConn, err := net.Dial("tcp", "localhost:9092")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer deadConn.Close()
+
+	suffix := strconv.FormatInt(time.Now().UnixNano(), 10)
+	groupID := "rebalance-consumers-" + suffix
+	topicName := "rebalance-events-" + suffix
+	checkCreateTopic(conn, topicName, 3, 130, 0)
+	sessionTimeoutMS := int32(1500)
+	firstCh := joinGroupAsyncWithMember(conn, groupID, "survivor", "", sessionTimeoutMS, 131, []string{topicName})
+	secondCh := joinGroupAsyncWithMember(deadConn, groupID, "crasher", "", sessionTimeoutMS, 132, []string{topicName})
+	first := receiveJoinGroup(firstCh)
+	second := receiveJoinGroup(secondCh)
+
+	leader, follower := first, second
+	leaderConn, followerSyncConn := conn, deadConn
+	if second.memberID == second.leaderID {
+		leader, follower = second, first
+		leaderConn, followerSyncConn = deadConn, conn
+	}
+	assignments := buildPlaceholderAssignments(leader.members, topicName, 3)
+	followerSyncCh := syncGroupAsync(followerSyncConn, groupID, follower.generationID, follower.memberID, nil, 133)
+	leaderSyncCh := syncGroupAsync(leaderConn, groupID, leader.generationID, leader.memberID, assignments, 134)
+	leaderSync := receiveSyncGroup(leaderSyncCh)
+	followerSync := receiveSyncGroup(followerSyncCh)
+	assertConsumerGroupAssignments(map[string][]byte{
+		leaderSync.memberID:   leaderSync.assignment,
+		followerSync.memberID: followerSync.assignment,
+	}, topicName, 3)
+
+	if second.memberID == first.memberID {
+		log.Fatal("unexpected duplicate member id")
+	}
+	survivor := first
+	crashedMemberID := second.memberID
+	log.Printf("simulated crash: member_id=%s stopped heartbeating", crashedMemberID)
+
+	var heartbeatCode int16
+	for attempts := 0; attempts < 10; attempts++ {
+		time.Sleep(300 * time.Millisecond)
+		heartbeatCode = checkHeartbeat(conn, groupID, survivor.generationID, survivor.memberID, int32(140+attempts))
+		if heartbeatCode == 27 {
+			break
+		}
+		if heartbeatCode != 0 {
+			log.Fatal("unexpected Heartbeat error_code=" + strconv.Itoa(int(heartbeatCode)))
+		}
+	}
+	if heartbeatCode != 27 {
+		log.Fatal("Heartbeat did not return REBALANCE_IN_PROGRESS")
+	}
+
+	rejoined := checkJoinGroup(conn, groupID, "survivor", survivor.memberID, sessionTimeoutMS, 151, []string{topicName})
+	if rejoined.generationID != 2 || rejoined.memberID != survivor.memberID || rejoined.leaderID != survivor.memberID || len(rejoined.members) != 1 {
+		log.Fatal("unexpected rejoin response after rebalance")
+	}
+	rejoinAssignments := map[string][]byte{
+		rejoined.memberID: encodeAssignment([]topicAssignment{{topic: topicName, partitions: []int32{0, 1, 2}}}),
+	}
+	rejoinedSync := checkSyncGroup(conn, groupID, rejoined.generationID, rejoined.memberID, rejoinAssignments, 152)
+	assertConsumerGroupAssignments(map[string][]byte{rejoinedSync.memberID: rejoinedSync.assignment}, topicName, 3)
+	if code := checkLeaveGroup(conn, groupID, rejoined.memberID, 153); code != 0 {
+		log.Fatal("unexpected LeaveGroup error_code=" + strconv.Itoa(int(code)))
+	}
+}
+
+func checkHeartbeat(conn net.Conn, groupID string, generationID int32, memberID string, correlationID int32) int16 {
+	header := protocol.RequestHeader{
+		APIKey:        12,
+		APIVersion:    0,
+		CorrelationID: correlationID,
+		ClientID:      nil,
+	}
+	e := protocol.NewEncoder()
+	protocol.WriteRequestHeader(e, header)
+	e.WriteString(groupID)
+	e.WriteInt32(generationID)
+	e.WriteString(memberID)
+	if err := network.WriteFrame(conn, e.Bytes()); err != nil {
+		log.Fatal(err)
+	}
+
+	respPayload, err := network.ReadFrame(conn)
+	if err != nil {
+		log.Fatal(err)
+	}
+	dec := protocol.NewDecoder(bytes.NewReader(respPayload))
+	respHeader, err := protocol.ReadResponseHeader(dec)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if respHeader.CorrelationID != correlationID {
+		log.Fatal("unexpected Heartbeat correlation_id=" + strconv.Itoa(int(respHeader.CorrelationID)))
+	}
+	errorCode, err := dec.ReadInt16()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read heartbeat error_code: %w", err))
+	}
+	log.Printf("heartbeat response: member_id=%s error_code=%d", memberID, errorCode)
+	return errorCode
+}
+
+func checkLeaveGroup(conn net.Conn, groupID string, memberID string, correlationID int32) int16 {
+	header := protocol.RequestHeader{
+		APIKey:        13,
+		APIVersion:    0,
+		CorrelationID: correlationID,
+		ClientID:      nil,
+	}
+	e := protocol.NewEncoder()
+	protocol.WriteRequestHeader(e, header)
+	e.WriteString(groupID)
+	e.WriteString(memberID)
+	if err := network.WriteFrame(conn, e.Bytes()); err != nil {
+		log.Fatal(err)
+	}
+
+	respPayload, err := network.ReadFrame(conn)
+	if err != nil {
+		log.Fatal(err)
+	}
+	dec := protocol.NewDecoder(bytes.NewReader(respPayload))
+	respHeader, err := protocol.ReadResponseHeader(dec)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if respHeader.CorrelationID != correlationID {
+		log.Fatal("unexpected LeaveGroup correlation_id=" + strconv.Itoa(int(respHeader.CorrelationID)))
+	}
+	errorCode, err := dec.ReadInt16()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read leave_group error_code: %w", err))
+	}
+	log.Printf("leave_group response: member_id=%s error_code=%d", memberID, errorCode)
+	return errorCode
+}
+
 func joinGroupAsync(conn net.Conn, groupID string, clientID string, correlationID int32, topics []string) <-chan joinGroupResult {
+	return joinGroupAsyncWithMember(conn, groupID, clientID, "", 30000, correlationID, topics)
+}
+
+func joinGroupAsyncWithMember(conn net.Conn, groupID string, clientID string, memberID string, sessionTimeoutMS int32, correlationID int32, topics []string) <-chan joinGroupResult {
 	ch := make(chan joinGroupResult, 1)
 	go func() {
-		ch <- checkJoinGroup(conn, groupID, clientID, correlationID, topics)
+		ch <- checkJoinGroup(conn, groupID, clientID, memberID, sessionTimeoutMS, correlationID, topics)
 	}()
 	return ch
 }
 
-func checkJoinGroup(conn net.Conn, groupID string, clientID string, correlationID int32, topics []string) joinGroupResult {
+func checkJoinGroup(conn net.Conn, groupID string, clientID string, memberID string, sessionTimeoutMS int32, correlationID int32, topics []string) joinGroupResult {
 	headerClientID := clientID
 	header := protocol.RequestHeader{
 		APIKey:        11,
@@ -297,8 +451,8 @@ func checkJoinGroup(conn net.Conn, groupID string, clientID string, correlationI
 	e := protocol.NewEncoder()
 	protocol.WriteRequestHeader(e, header)
 	e.WriteString(groupID)
-	e.WriteInt32(30000)
-	e.WriteString("")
+	e.WriteInt32(sessionTimeoutMS)
+	e.WriteString(memberID)
 	e.WriteString("consumer")
 	e.WriteArrayLen(1)
 	e.WriteString("range")
@@ -336,7 +490,7 @@ func checkJoinGroup(conn net.Conn, groupID string, clientID string, correlationI
 	if err != nil {
 		log.Fatal(fmt.Errorf("read join_group leader: %w", err))
 	}
-	memberID, err := dec.ReadString()
+	resolvedMemberID, err := dec.ReadString()
 	if err != nil {
 		log.Fatal(fmt.Errorf("read join_group member_id: %w", err))
 	}
@@ -361,12 +515,12 @@ func checkJoinGroup(conn net.Conn, groupID string, clientID string, correlationI
 		members = append(members, joinGroupMember{id: id, metadata: metadata})
 	}
 
-	log.Printf("join_group response: client_id=%s generation_id=%d protocol=%s leader=%s member_id=%s members=%d", clientID, generationID, protocolName, leaderID, memberID, len(members))
+	log.Printf("join_group response: client_id=%s generation_id=%d protocol=%s leader=%s member_id=%s members=%d", clientID, generationID, protocolName, leaderID, resolvedMemberID, len(members))
 	return joinGroupResult{
 		generationID: generationID,
 		protocolName: protocolName,
 		leaderID:     leaderID,
-		memberID:     memberID,
+		memberID:     resolvedMemberID,
 		members:      members,
 	}
 }

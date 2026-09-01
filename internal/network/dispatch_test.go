@@ -104,8 +104,8 @@ func TestDispatchApiVersionsWritesCorrelationIDAndSupportedAPIs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadArrayLen api keys: unexpected error: %v", err)
 	}
-	if apiCount != 10 {
-		t.Fatalf("api key count: got %d, want 10", apiCount)
+	if apiCount != 12 {
+		t.Fatalf("api key count: got %d, want 12", apiCount)
 	}
 
 	foundProduce := false
@@ -114,6 +114,8 @@ func TestDispatchApiVersionsWritesCorrelationIDAndSupportedAPIs(t *testing.T) {
 	foundMetadata := false
 	foundFindCoordinator := false
 	foundJoinGroup := false
+	foundHeartbeat := false
+	foundLeaveGroup := false
 	foundSyncGroup := false
 	foundApiVersions := false
 	foundCreateTopics := false
@@ -138,6 +140,12 @@ func TestDispatchApiVersionsWritesCorrelationIDAndSupportedAPIs(t *testing.T) {
 		if apiKey == 11 && minVersion == 0 && maxVersion == 0 {
 			foundJoinGroup = true
 		}
+		if apiKey == 12 && minVersion == 0 && maxVersion == 0 {
+			foundHeartbeat = true
+		}
+		if apiKey == 13 && minVersion == 0 && maxVersion == 0 {
+			foundLeaveGroup = true
+		}
 		if apiKey == 14 && minVersion == 0 && maxVersion == 0 {
 			foundSyncGroup = true
 		}
@@ -151,8 +159,8 @@ func TestDispatchApiVersionsWritesCorrelationIDAndSupportedAPIs(t *testing.T) {
 			foundDeleteTopics = true
 		}
 	}
-	if !foundProduce || !foundFetch || !foundListOffsets || !foundMetadata || !foundFindCoordinator || !foundJoinGroup || !foundSyncGroup || !foundApiVersions || !foundCreateTopics || !foundDeleteTopics {
-		t.Fatalf("api versions: found_produce=%t found_fetch=%t found_list_offsets=%t found_metadata=%t found_find_coordinator=%t found_join_group=%t found_sync_group=%t found_api_versions=%t found_create_topics=%t found_delete_topics=%t, want all true",
-			foundProduce, foundFetch, foundListOffsets, foundMetadata, foundFindCoordinator, foundJoinGroup, foundSyncGroup, foundApiVersions, foundCreateTopics, foundDeleteTopics)
+	if !foundProduce || !foundFetch || !foundListOffsets || !foundMetadata || !foundFindCoordinator || !foundJoinGroup || !foundHeartbeat || !foundLeaveGroup || !foundSyncGroup || !foundApiVersions || !foundCreateTopics || !foundDeleteTopics {
+		t.Fatalf("api versions: found_produce=%t found_fetch=%t found_list_offsets=%t found_metadata=%t found_find_coordinator=%t found_join_group=%t found_heartbeat=%t found_leave_group=%t found_sync_group=%t found_api_versions=%t found_create_topics=%t found_delete_topics=%t, want all true",
+			foundProduce, foundFetch, foundListOffsets, foundMetadata, foundFindCoordinator, foundJoinGroup, foundHeartbeat, foundLeaveGroup, foundSyncGroup, foundApiVersions, foundCreateTopics, foundDeleteTopics)
 	}
 }
