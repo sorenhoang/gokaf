@@ -14,6 +14,8 @@ var supportedAPIs = []supportedAPI{
 	{APIKey: 2, MinVersion: 1, MaxVersion: 1},
 	{APIKey: 3, MinVersion: 0, MaxVersion: 0},
 	{APIKey: 10, MinVersion: 0, MaxVersion: 0},
+	{APIKey: 11, MinVersion: 0, MaxVersion: 0},
+	{APIKey: 14, MinVersion: 0, MaxVersion: 0},
 	{APIKey: 18, MinVersion: 0, MaxVersion: 0},
 	{APIKey: 19, MinVersion: 0, MaxVersion: 0},
 	{APIKey: 20, MinVersion: 0, MaxVersion: 0},

@@ -10,7 +10,9 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/sorenhoang/gokaf/internal/group"
 	"github.com/sorenhoang/gokaf/internal/network"
 	"github.com/sorenhoang/gokaf/internal/storage"
 	"github.com/sorenhoang/gokaf/internal/topic"
@@ -26,6 +28,7 @@ func main() {
 		Port:   9092,
 		Topics: topic.NewRegistry(),
 		Logs:   storage.NewManager(*dataDir),
+		Groups: group.NewCoordinator(3 * time.Second),
 	}
 	defer broker.Logs.Close()
 	broker.Topics.Add(topic.Topic{

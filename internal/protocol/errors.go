@@ -9,4 +9,6 @@ const (
 	ErrTopicAlreadyExists       int16 = 36
 	ErrInvalidPartitions        int16 = 37
 	ErrInvalidReplicationFactor int16 = 38
+	ErrIllegalGeneration        int16 = 22
+	ErrUnknownMemberID          int16 = 25
 )

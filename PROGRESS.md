@@ -48,7 +48,7 @@ not "done." Update this file as phases complete; keep `CLAUDE.md`'s
 
 - [x] **Phase 11** — FindCoordinator (key=10)
       AC: Correct broker info returned for any group_id.
-- [ ] **Phase 12** — JoinGroup / SyncGroup (key=11/14) + state machine
+- [x] **Phase 12** — JoinGroup / SyncGroup (key=11/14) + state machine
       AC: 2–3 simulated consumers in the same group → one is elected
       leader → SyncGroup assigns partitions with no overlap and no gaps.
 - [ ] **Phase 13** — Heartbeat / LeaveGroup (key=12/13) + session timeout

@@ -249,7 +249,7 @@
   <h2>Track B — Consumer Group</h2>
   <ul>
     <li class="done"><a href="#phase-11">Phase 11 — FindCoordinator</a></li>
-    <li><a href="#phase-12">Phase 12 — JoinGroup/SyncGroup</a></li>
+    <li class="done"><a href="#phase-12">Phase 12 — JoinGroup/SyncGroup</a></li>
     <li><a href="#phase-13">Phase 13 — Heartbeat/LeaveGroup</a></li>
     <li><a href="#phase-14">Phase 14 — Offset commit/fetch</a></li>
     <li><a href="#phase-15">Phase 15 — Real assignors</a></li>
@@ -472,7 +472,7 @@
       </dl>
     </div>
 
-    <div class="phase" id="phase-12">
+    <div class="phase done" id="phase-12">
       <h3><span class="phase-id">Phase 12</span> JoinGroup / SyncGroup (key=11/14) + state machine</h3>
       <dl>
         <dt>Output</dt><dd><code>internal/group/coordinator.go</code>: state machine (<code>Empty → PreparingRebalance → CompletingRebalance → Stable</code>). JoinGroup registers members and picks one as leader; SyncGroup distributes the leader's partition assignment to every member.</dd>

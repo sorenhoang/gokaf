@@ -10,13 +10,14 @@ import (
 	"log"
 	"net"
 	"strconv"
+	"time"
 
 	"github.com/sorenhoang/gokaf/internal/network"
 	"github.com/sorenhoang/gokaf/internal/protocol"
 )
 
 func main() {
-	mode := flag.String("mode", "full", "test mode: full, produce-fetch, fetch-only, multi-partition, find-coordinator")
+	mode := flag.String("mode", "full", "test mode: full, produce-fetch, fetch-only, multi-partition, find-coordinator, consumer-group")
 	flag.Parse()
 
 	conn, err := net.Dial("tcp", "localhost:9092")
@@ -54,6 +55,8 @@ func main() {
 	case "find-coordinator":
 		checkFindCoordinator(conn, "group-a", 100)
 		checkFindCoordinator(conn, "anything", 101)
+	case "consumer-group":
+		checkConsumerGroup(conn)
 	default:
 		log.Fatal("unknown mode: " + *mode)
 	}
@@ -130,6 +133,8 @@ func checkApiVersions(conn net.Conn) {
 	foundListOffsets := false
 	foundApiVersions := false
 	foundFindCoordinator := false
+	foundJoinGroup := false
+	foundSyncGroup := false
 	for i := 0; i < apiCount; i++ {
 		apiKey, minVersion, maxVersion := readAPIVersionEntry(dec)
 		log.Printf("api_versions entry: api_key=%d min_version=%d max_version=%d", apiKey, minVersion, maxVersion)
@@ -139,14 +144,20 @@ func checkApiVersions(conn net.Conn) {
 		if apiKey == 10 && minVersion == 0 && maxVersion == 0 {
 			foundFindCoordinator = true
 		}
+		if apiKey == 11 && minVersion == 0 && maxVersion == 0 {
+			foundJoinGroup = true
+		}
+		if apiKey == 14 && minVersion == 0 && maxVersion == 0 {
+			foundSyncGroup = true
+		}
 		if apiKey == 18 && minVersion == 0 && maxVersion == 0 {
 			foundApiVersions = true
 		}
 	}
 
 	log.Printf("api_versions response: correlation_id=%d error_code=%d api_count=%d", respHeader.CorrelationID, errorCode, apiCount)
-	if respHeader.CorrelationID != 43 || errorCode != 0 || !foundApiVersions || !foundListOffsets || !foundFindCoordinator {
-		log.Fatal("unexpected ApiVersions response: correlation_id=" + strconv.Itoa(int(respHeader.CorrelationID)) + " error_code=" + strconv.Itoa(int(errorCode)) + " found_api_versions=" + strconv.FormatBool(foundApiVersions) + " found_list_offsets=" + strconv.FormatBool(foundListOffsets) + " found_find_coordinator=" + strconv.FormatBool(foundFindCoordinator))
+	if respHeader.CorrelationID != 43 || errorCode != 0 || !foundApiVersions || !foundListOffsets || !foundFindCoordinator || !foundJoinGroup || !foundSyncGroup {
+		log.Fatal("unexpected ApiVersions response: correlation_id=" + strconv.Itoa(int(respHeader.CorrelationID)) + " error_code=" + strconv.Itoa(int(errorCode)) + " found_api_versions=" + strconv.FormatBool(foundApiVersions) + " found_list_offsets=" + strconv.FormatBool(foundListOffsets) + " found_find_coordinator=" + strconv.FormatBool(foundFindCoordinator) + " found_join_group=" + strconv.FormatBool(foundJoinGroup) + " found_sync_group=" + strconv.FormatBool(foundSyncGroup))
 	}
 }
 
@@ -196,6 +207,344 @@ func checkFindCoordinator(conn net.Conn, groupID string, correlationID int32) {
 	if respHeader.CorrelationID != correlationID || errorCode != 0 || nodeID != 1 || host != "localhost" || port != 9092 {
 		log.Fatal("unexpected FindCoordinator response")
 	}
+}
+
+type joinGroupResult struct {
+	generationID int32
+	protocolName string
+	leaderID     string
+	memberID     string
+	members      []joinGroupMember
+}
+
+type joinGroupMember struct {
+	id       string
+	metadata []byte
+}
+
+type syncGroupResult struct {
+	memberID   string
+	assignment []byte
+}
+
+type topicAssignment struct {
+	topic      string
+	partitions []int32
+}
+
+func checkConsumerGroup(conn net.Conn) {
+	checkCreateTopic(conn, "group-events", 3, 120, 0)
+
+	followerConn, err := net.Dial("tcp", "localhost:9092")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer followerConn.Close()
+
+	groupID := "orders-consumers"
+	topicName := "group-events"
+	firstCh := joinGroupAsync(conn, groupID, "client-a", 121, []string{topicName})
+	secondCh := joinGroupAsync(followerConn, groupID, "client-b", 122, []string{topicName})
+	first := receiveJoinGroup(firstCh)
+	second := receiveJoinGroup(secondCh)
+
+	leader, follower := first, second
+	leaderConn, followerSyncConn := conn, followerConn
+	if second.memberID == second.leaderID {
+		leader, follower = second, first
+		leaderConn, followerSyncConn = followerConn, conn
+	}
+
+	if leader.leaderID == "" || leader.leaderID != leader.memberID || follower.leaderID != leader.memberID {
+		log.Fatal("unexpected JoinGroup leader/member ids")
+	}
+	if leader.generationID != 1 || follower.generationID != 1 || leader.protocolName != "range" || follower.protocolName != "range" {
+		log.Fatal("unexpected JoinGroup generation/protocol")
+	}
+	if len(leader.members) != 2 || len(follower.members) != 0 {
+		log.Fatal("unexpected JoinGroup members array sizes")
+	}
+
+	assignments := buildPlaceholderAssignments(leader.members, topicName, 3)
+	followerSyncCh := syncGroupAsync(followerSyncConn, groupID, follower.generationID, follower.memberID, nil, 123)
+	leaderSyncCh := syncGroupAsync(leaderConn, groupID, leader.generationID, leader.memberID, assignments, 124)
+
+	leaderSync := receiveSyncGroup(leaderSyncCh)
+	followerSync := receiveSyncGroup(followerSyncCh)
+	assertConsumerGroupAssignments(map[string][]byte{
+		leaderSync.memberID:   leaderSync.assignment,
+		followerSync.memberID: followerSync.assignment,
+	}, topicName, 3)
+}
+
+func joinGroupAsync(conn net.Conn, groupID string, clientID string, correlationID int32, topics []string) <-chan joinGroupResult {
+	ch := make(chan joinGroupResult, 1)
+	go func() {
+		ch <- checkJoinGroup(conn, groupID, clientID, correlationID, topics)
+	}()
+	return ch
+}
+
+func checkJoinGroup(conn net.Conn, groupID string, clientID string, correlationID int32, topics []string) joinGroupResult {
+	headerClientID := clientID
+	header := protocol.RequestHeader{
+		APIKey:        11,
+		APIVersion:    0,
+		CorrelationID: correlationID,
+		ClientID:      &headerClientID,
+	}
+
+	e := protocol.NewEncoder()
+	protocol.WriteRequestHeader(e, header)
+	e.WriteString(groupID)
+	e.WriteInt32(30000)
+	e.WriteString("")
+	e.WriteString("consumer")
+	e.WriteArrayLen(1)
+	e.WriteString("range")
+	e.WriteBytes(encodeSubscription(topics))
+	if err := network.WriteFrame(conn, e.Bytes()); err != nil {
+		log.Fatal(err)
+	}
+
+	respPayload, err := network.ReadFrame(conn)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	dec := protocol.NewDecoder(bytes.NewReader(respPayload))
+	respHeader, err := protocol.ReadResponseHeader(dec)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if respHeader.CorrelationID != correlationID {
+		log.Fatal("unexpected JoinGroup correlation_id=" + strconv.Itoa(int(respHeader.CorrelationID)))
+	}
+	errorCode, err := dec.ReadInt16()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read join_group error_code: %w", err))
+	}
+	generationID, err := dec.ReadInt32()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read join_group generation_id: %w", err))
+	}
+	protocolName, err := dec.ReadString()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read join_group protocol_name: %w", err))
+	}
+	leaderID, err := dec.ReadString()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read join_group leader: %w", err))
+	}
+	memberID, err := dec.ReadString()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read join_group member_id: %w", err))
+	}
+	memberCount, err := dec.ReadArrayLen()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read join_group member count: %w", err))
+	}
+	if errorCode != 0 {
+		log.Fatal("unexpected JoinGroup error_code=" + strconv.Itoa(int(errorCode)))
+	}
+
+	members := make([]joinGroupMember, 0, memberCount)
+	for i := 0; i < memberCount; i++ {
+		id, err := dec.ReadString()
+		if err != nil {
+			log.Fatal(fmt.Errorf("read join_group response member_id: %w", err))
+		}
+		metadata, err := dec.ReadBytes()
+		if err != nil {
+			log.Fatal(fmt.Errorf("read join_group response metadata: %w", err))
+		}
+		members = append(members, joinGroupMember{id: id, metadata: metadata})
+	}
+
+	log.Printf("join_group response: client_id=%s generation_id=%d protocol=%s leader=%s member_id=%s members=%d", clientID, generationID, protocolName, leaderID, memberID, len(members))
+	return joinGroupResult{
+		generationID: generationID,
+		protocolName: protocolName,
+		leaderID:     leaderID,
+		memberID:     memberID,
+		members:      members,
+	}
+}
+
+func syncGroupAsync(conn net.Conn, groupID string, generationID int32, memberID string, assignments map[string][]byte, correlationID int32) <-chan syncGroupResult {
+	ch := make(chan syncGroupResult, 1)
+	go func() {
+		ch <- checkSyncGroup(conn, groupID, generationID, memberID, assignments, correlationID)
+	}()
+	return ch
+}
+
+func checkSyncGroup(conn net.Conn, groupID string, generationID int32, memberID string, assignments map[string][]byte, correlationID int32) syncGroupResult {
+	header := protocol.RequestHeader{
+		APIKey:        14,
+		APIVersion:    0,
+		CorrelationID: correlationID,
+		ClientID:      nil,
+	}
+
+	e := protocol.NewEncoder()
+	protocol.WriteRequestHeader(e, header)
+	e.WriteString(groupID)
+	e.WriteInt32(generationID)
+	e.WriteString(memberID)
+	e.WriteArrayLen(len(assignments))
+	for assignmentMemberID, assignment := range assignments {
+		e.WriteString(assignmentMemberID)
+		e.WriteBytes(assignment)
+	}
+	if err := network.WriteFrame(conn, e.Bytes()); err != nil {
+		log.Fatal(err)
+	}
+
+	respPayload, err := network.ReadFrame(conn)
+	if err != nil {
+		log.Fatal(err)
+	}
+	dec := protocol.NewDecoder(bytes.NewReader(respPayload))
+	respHeader, err := protocol.ReadResponseHeader(dec)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if respHeader.CorrelationID != correlationID {
+		log.Fatal("unexpected SyncGroup correlation_id=" + strconv.Itoa(int(respHeader.CorrelationID)))
+	}
+	errorCode, err := dec.ReadInt16()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read sync_group error_code: %w", err))
+	}
+	assignment, err := dec.ReadBytes()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read sync_group assignment: %w", err))
+	}
+	if errorCode != 0 {
+		log.Fatal("unexpected SyncGroup error_code=" + strconv.Itoa(int(errorCode)))
+	}
+	log.Printf("sync_group response: member_id=%s assignment_bytes=%d", memberID, len(assignment))
+	return syncGroupResult{memberID: memberID, assignment: assignment}
+}
+
+func receiveJoinGroup(ch <-chan joinGroupResult) joinGroupResult {
+	select {
+	case result := <-ch:
+		return result
+	case <-time.After(5 * time.Second):
+		log.Fatal("timed out waiting for JoinGroup response")
+		return joinGroupResult{}
+	}
+}
+
+func receiveSyncGroup(ch <-chan syncGroupResult) syncGroupResult {
+	select {
+	case result := <-ch:
+		return result
+	case <-time.After(5 * time.Second):
+		log.Fatal("timed out waiting for SyncGroup response")
+		return syncGroupResult{}
+	}
+}
+
+func encodeSubscription(topics []string) []byte {
+	e := protocol.NewEncoder()
+	e.WriteInt16(0)
+	e.WriteArrayLen(len(topics))
+	for _, topic := range topics {
+		e.WriteString(topic)
+	}
+	e.WriteInt32(-1)
+	return e.Bytes()
+}
+
+func encodeAssignment(assignments []topicAssignment) []byte {
+	e := protocol.NewEncoder()
+	e.WriteInt16(0)
+	e.WriteArrayLen(len(assignments))
+	for _, assignment := range assignments {
+		e.WriteString(assignment.topic)
+		e.WriteArrayLen(len(assignment.partitions))
+		for _, partition := range assignment.partitions {
+			e.WriteInt32(partition)
+		}
+	}
+	e.WriteInt32(-1)
+	return e.Bytes()
+}
+
+func decodeAssignment(b []byte) []topicAssignment {
+	dec := protocol.NewDecoder(bytes.NewReader(b))
+	if _, err := dec.ReadInt16(); err != nil {
+		log.Fatal(fmt.Errorf("read assignment version: %w", err))
+	}
+	assignmentCount, err := dec.ReadArrayLen()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read assignment count: %w", err))
+	}
+	assignments := make([]topicAssignment, 0, assignmentCount)
+	for i := 0; i < assignmentCount; i++ {
+		topicName, err := dec.ReadString()
+		if err != nil {
+			log.Fatal(fmt.Errorf("read assignment topic: %w", err))
+		}
+		partitionCount, err := dec.ReadArrayLen()
+		if err != nil {
+			log.Fatal(fmt.Errorf("read assignment partition count: %w", err))
+		}
+		partitions := make([]int32, 0, partitionCount)
+		for j := 0; j < partitionCount; j++ {
+			partition, err := dec.ReadInt32()
+			if err != nil {
+				log.Fatal(fmt.Errorf("read assignment partition: %w", err))
+			}
+			partitions = append(partitions, partition)
+		}
+		assignments = append(assignments, topicAssignment{topic: topicName, partitions: partitions})
+	}
+	if _, err := dec.ReadBytes(); err != nil {
+		log.Fatal(fmt.Errorf("read assignment user_data: %w", err))
+	}
+	return assignments
+}
+
+func buildPlaceholderAssignments(members []joinGroupMember, topicName string, partitionCount int32) map[string][]byte {
+	assignments := make(map[string][]byte, len(members))
+	for _, member := range members {
+		assignments[member.id] = encodeAssignment([]topicAssignment{{topic: topicName}})
+	}
+	for partition := int32(0); partition < partitionCount; partition++ {
+		member := members[int(partition)%len(members)]
+		current := decodeAssignment(assignments[member.id])
+		current[0].partitions = append(current[0].partitions, partition)
+		assignments[member.id] = encodeAssignment(current)
+	}
+	return assignments
+}
+
+func assertConsumerGroupAssignments(assignments map[string][]byte, topicName string, partitionCount int32) {
+	seen := map[int32]string{}
+	for memberID, assignmentBytes := range assignments {
+		decoded := decodeAssignment(assignmentBytes)
+		for _, assignment := range decoded {
+			if assignment.topic != topicName {
+				log.Fatal("unexpected assignment topic=" + assignment.topic)
+			}
+			for _, partition := range assignment.partitions {
+				if priorMemberID, ok := seen[partition]; ok {
+					log.Fatal("partition assigned twice: partition=" + strconv.Itoa(int(partition)) + " first=" + priorMemberID + " second=" + memberID)
+				}
+				seen[partition] = memberID
+			}
+		}
+	}
+	for partition := int32(0); partition < partitionCount; partition++ {
+		if _, ok := seen[partition]; !ok {
+			log.Fatal("partition was not assigned: " + strconv.Itoa(int(partition)))
+		}
+	}
+	log.Printf("consumer group assignment complete: topic=%s partitions=%v", topicName, seen)
 }
 
 func readAPIVersionEntry(dec *protocol.Decoder) (int16, int16, int16) {

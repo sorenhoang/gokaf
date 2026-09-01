@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 
+	"github.com/sorenhoang/gokaf/internal/group"
 	"github.com/sorenhoang/gokaf/internal/protocol"
 	"github.com/sorenhoang/gokaf/internal/storage"
 	"github.com/sorenhoang/gokaf/internal/topic"
@@ -21,6 +22,8 @@ var dispatchTable = map[int16]handlerFunc{
 	2:  (*Broker).handleListOffsets,
 	3:  (*Broker).handleMetadata,
 	10: (*Broker).handleFindCoordinator,
+	11: (*Broker).handleJoinGroup,
+	14: (*Broker).handleSyncGroup,
 	18: (*Broker).handleApiVersions,
 	19: (*Broker).handleCreateTopics,
 	20: (*Broker).handleDeleteTopics,
@@ -32,6 +35,7 @@ type Broker struct {
 	Port   int32
 	Topics *topic.Registry
 	Logs   *storage.Manager
+	Groups *group.Coordinator
 }
 
 func (b *Broker) Dispatch(conn net.Conn, payload []byte) error {
