@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/sorenhoang/gokaf/internal/cluster"
 	"github.com/sorenhoang/gokaf/internal/protocol"
 	"github.com/sorenhoang/gokaf/internal/topic"
 )
@@ -18,7 +19,7 @@ func TestHandleMetadataAllTopicsWritesBrokerTopicsAndPartitionLeaders(t *testing
 		},
 	})
 
-	broker := &Broker{NodeID: 1, Host: "localhost", Port: 9092, Topics: registry}
+	broker := &Broker{NodeID: 1, Host: "localhost", Port: 9092, Topics: registry, Cluster: singleBrokerMembership(t, 1, "localhost", 9092)}
 	req := protocol.NewEncoder()
 	req.WriteArrayLen(0)
 
@@ -111,8 +112,46 @@ func TestHandleMetadataAllTopicsWritesBrokerTopicsAndPartitionLeaders(t *testing
 	}
 }
 
+func TestHandleMetadataWritesAllClusterBrokers(t *testing.T) {
+	broker := &Broker{
+		NodeID: 2,
+		Host:   "localhost",
+		Port:   9093,
+		Topics: topic.NewRegistry(),
+		Cluster: clusterMembership(t,
+			"1@localhost:9092,2@localhost:9093,3@localhost:9094",
+			2,
+			"localhost",
+			9093,
+		),
+	}
+	req := protocol.NewEncoder()
+	req.WriteArrayLen(0)
+
+	body, err := broker.handleMetadata(protocol.RequestHeader{APIKey: 3, APIVersion: 0}, req.Bytes())
+	if err != nil {
+		t.Fatalf("handleMetadata: unexpected error: %v", err)
+	}
+
+	dec := protocol.NewDecoder(bytes.NewReader(body))
+	got := readMetadataBrokers(t, dec)
+	want := []cluster.Broker{
+		{ID: 1, Host: "localhost", Port: 9092},
+		{ID: 2, Host: "localhost", Port: 9093},
+		{ID: 3, Host: "localhost", Port: 9094},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("broker count: got %d, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("broker[%d]: got %#v, want %#v", i, got[i], want[i])
+		}
+	}
+}
+
 func TestHandleMetadataUnknownTopicReturnsErrorCode3(t *testing.T) {
-	broker := &Broker{NodeID: 1, Host: "localhost", Port: 9092, Topics: topic.NewRegistry()}
+	broker := &Broker{NodeID: 1, Host: "localhost", Port: 9092, Topics: topic.NewRegistry(), Cluster: singleBrokerMembership(t, 1, "localhost", 9092)}
 
 	req := protocol.NewEncoder()
 	req.WriteArrayLen(1)
@@ -154,21 +193,47 @@ func TestHandleMetadataUnknownTopicReturnsErrorCode3(t *testing.T) {
 func skipMetadataBrokers(t *testing.T, dec *protocol.Decoder) {
 	t.Helper()
 
+	_ = readMetadataBrokers(t, dec)
+}
+
+func readMetadataBrokers(t *testing.T, dec *protocol.Decoder) []cluster.Broker {
+	t.Helper()
+
 	brokerCount, err := dec.ReadArrayLen()
 	if err != nil {
 		t.Fatalf("ReadArrayLen brokers: unexpected error: %v", err)
 	}
+	brokers := make([]cluster.Broker, 0, brokerCount)
 	for i := 0; i < brokerCount; i++ {
-		if _, err := dec.ReadInt32(); err != nil {
+		nodeID, err := dec.ReadInt32()
+		if err != nil {
 			t.Fatalf("ReadInt32 broker node id: unexpected error: %v", err)
 		}
-		if _, err := dec.ReadString(); err != nil {
+		host, err := dec.ReadString()
+		if err != nil {
 			t.Fatalf("ReadString broker host: unexpected error: %v", err)
 		}
-		if _, err := dec.ReadInt32(); err != nil {
+		port, err := dec.ReadInt32()
+		if err != nil {
 			t.Fatalf("ReadInt32 broker port: unexpected error: %v", err)
 		}
+		brokers = append(brokers, cluster.Broker{ID: nodeID, Host: host, Port: port})
 	}
+	return brokers
+}
+
+func singleBrokerMembership(t *testing.T, id int32, host string, port int32) *cluster.Membership {
+	t.Helper()
+	return clusterMembership(t, "", id, host, port)
+}
+
+func clusterMembership(t *testing.T, peers string, selfID int32, selfHost string, selfPort int32) *cluster.Membership {
+	t.Helper()
+	membership, err := cluster.ParseMembership(peers, selfID, selfHost, selfPort)
+	if err != nil {
+		t.Fatalf("ParseMembership: unexpected error: %v", err)
+	}
+	return membership
 }
 
 func TestMetadataHandlerIsRegistered(t *testing.T) {

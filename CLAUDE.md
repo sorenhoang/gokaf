@@ -44,7 +44,7 @@ delegating it to Claude. Behave accordingly:
 
 ## Current status
 
-Phases 0–16 done. Track C complete. Next up: **Phase 17 — Multi-broker bootstrap** (Track D).
+Phases 0–17 done. Next up: **Phase 18 — Partition leader assignment across brokers** (Track D).
 
 Full checklist with acceptance criteria per phase: [PROGRESS.md](PROGRESS.md).
 Update both this line and the matching checkbox in PROGRESS.md as phases

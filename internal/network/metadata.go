@@ -3,6 +3,7 @@ package network
 import (
 	"bytes"
 
+	"github.com/sorenhoang/gokaf/internal/cluster"
 	"github.com/sorenhoang/gokaf/internal/protocol"
 	"github.com/sorenhoang/gokaf/internal/topic"
 )
@@ -36,10 +37,13 @@ func (b *Broker) handleMetadata(header protocol.RequestHeader, body []byte) ([]b
 	}
 
 	e := protocol.NewEncoder()
-	e.WriteArrayLen(1)
-	e.WriteInt32(b.NodeID)
-	e.WriteString(b.Host)
-	e.WriteInt32(b.Port)
+	brokers := b.metadataBrokers()
+	e.WriteArrayLen(len(brokers))
+	for _, broker := range brokers {
+		e.WriteInt32(broker.ID)
+		e.WriteString(broker.Host)
+		e.WriteInt32(broker.Port)
+	}
 
 	e.WriteArrayLen(len(topics) + len(unknownTopics))
 	for _, t := range topics {
@@ -52,6 +56,13 @@ func (b *Broker) handleMetadata(header protocol.RequestHeader, body []byte) ([]b
 	}
 
 	return e.Bytes(), nil
+}
+
+func (b *Broker) metadataBrokers() []cluster.Broker {
+	if b.Cluster == nil {
+		return []cluster.Broker{{ID: b.NodeID, Host: b.Host, Port: b.Port}}
+	}
+	return b.Cluster.All()
 }
 
 func writeMetadataTopic(e *protocol.Encoder, t topic.Topic) {

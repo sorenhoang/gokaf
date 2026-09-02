@@ -262,7 +262,7 @@
 
   <h2>Track D — Replication</h2>
   <ul>
-    <li><a href="#phase-17">Phase 17 — Multi-broker bootstrap</a></li>
+    <li class="done"><a href="#phase-17">Phase 17 — Multi-broker bootstrap</a></li>
     <li><a href="#phase-18">Phase 18 — Leader assignment</a></li>
     <li><a href="#phase-19">Phase 19 — ReplicaFetcher</a></li>
     <li><a href="#phase-20">Phase 20 — ISR / high-watermark</a></li>
@@ -534,7 +534,7 @@
     </div>
     <p class="track-note">This is where the project stops being "one process" and starts being a distributed system.</p>
 
-    <div class="phase" id="phase-17">
+    <div class="phase done" id="phase-17">
       <h3><span class="phase-id">Phase 17</span> Multi-broker bootstrap</h3>
       <dl>
         <dt>Output</dt><dd>Run N broker instances (each with a broker_id and its own port), each aware of the others via static config (no service discovery yet). <code>internal/cluster/brokerclient.go</code> reuses the Track A protocol layer for inter-broker calls.</dd>

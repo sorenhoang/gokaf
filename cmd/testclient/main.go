@@ -19,10 +19,11 @@ import (
 )
 
 func main() {
-	mode := flag.String("mode", "full", "test mode: full, produce-fetch, fetch-only, multi-partition, find-coordinator, consumer-group, consumer-group-rebalance, consumer-group-roundrobin, offset-commit-fetch, offset-commit, offset-fetch, idempotent-producer")
+	mode := flag.String("mode", "full", "test mode: full, produce-fetch, fetch-only, multi-partition, metadata-cluster, find-coordinator, consumer-group, consumer-group-rebalance, consumer-group-roundrobin, offset-commit-fetch, offset-commit, offset-fetch, idempotent-producer")
+	addr := flag.String("addr", "localhost:9092", "broker address")
 	flag.Parse()
 
-	conn, err := net.Dial("tcp", "localhost:9092")
+	conn, err := net.Dial("tcp", *addr)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -54,6 +55,8 @@ func main() {
 		checkFetch(conn)
 	case "multi-partition":
 		checkMultiPartition(conn)
+	case "metadata-cluster":
+		checkMetadataCluster(conn)
 	case "find-coordinator":
 		checkFindCoordinator(conn, "group-a", 100)
 		checkFindCoordinator(conn, "anything", 101)
@@ -1589,6 +1592,51 @@ func putInt64(dst []byte, value int64) {
 	binary.BigEndian.PutUint64(dst, uint64(value))
 }
 
+type metadataBroker struct {
+	id   int32
+	host string
+	port int32
+}
+
+func checkMetadataCluster(conn net.Conn) {
+	header := protocol.RequestHeader{
+		APIKey:        3,
+		APIVersion:    0,
+		CorrelationID: 177,
+		ClientID:      nil,
+	}
+
+	e := protocol.NewEncoder()
+	protocol.WriteRequestHeader(e, header)
+	e.WriteArrayLen(0)
+	if err := network.WriteFrame(conn, e.Bytes()); err != nil {
+		log.Fatal(err)
+	}
+
+	respPayload, err := network.ReadFrame(conn)
+	if err != nil {
+		log.Fatal(err)
+	}
+	dec := protocol.NewDecoder(bytes.NewReader(respPayload))
+	respHeader, err := protocol.ReadResponseHeader(dec)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if respHeader.CorrelationID != 177 {
+		log.Fatal("unexpected Metadata correlation_id=" + strconv.Itoa(int(respHeader.CorrelationID)))
+	}
+	brokers := readMetadataBrokers(dec)
+	want := []metadataBroker{
+		{id: 1, host: "localhost", port: 9092},
+		{id: 2, host: "localhost", port: 9093},
+		{id: 3, host: "localhost", port: 9094},
+	}
+	if !equalMetadataBrokers(brokers, want) {
+		log.Fatal("unexpected Metadata cluster brokers")
+	}
+	log.Printf("metadata cluster brokers: %v", brokers)
+}
+
 func checkMetadataTopic(conn net.Conn, wantName string, wantPresent bool, wantPartitions int) {
 	header := protocol.RequestHeader{
 		APIKey:        3,
@@ -1618,29 +1666,11 @@ func checkMetadataTopic(conn net.Conn, wantName string, wantPresent bool, wantPa
 		log.Fatal("unexpected Metadata correlation_id=" + strconv.Itoa(int(respHeader.CorrelationID)))
 	}
 
-	brokerCount, err := dec.ReadArrayLen()
-	if err != nil {
-		log.Fatal(fmt.Errorf("read broker count: %w", err))
+	brokers := readMetadataBrokers(dec)
+	if len(brokers) < 1 {
+		log.Fatal("unexpected Metadata broker count=0")
 	}
-	if brokerCount != 1 {
-		log.Fatal("unexpected Metadata broker count=" + strconv.Itoa(brokerCount))
-	}
-	nodeID, err := dec.ReadInt32()
-	if err != nil {
-		log.Fatal(fmt.Errorf("read broker node_id: %w", err))
-	}
-	host, err := dec.ReadString()
-	if err != nil {
-		log.Fatal(fmt.Errorf("read broker host: %w", err))
-	}
-	port, err := dec.ReadInt32()
-	if err != nil {
-		log.Fatal(fmt.Errorf("read broker port: %w", err))
-	}
-	log.Printf("metadata broker: node_id=%d host=%s port=%d", nodeID, host, port)
-	if nodeID != 1 || host != "localhost" || port != 9092 {
-		log.Fatal("unexpected Metadata broker")
-	}
+	log.Printf("metadata brokers: %v", brokers)
 
 	topicCount, err := dec.ReadArrayLen()
 	if err != nil {
@@ -1696,7 +1726,7 @@ func checkMetadataTopic(conn net.Conn, wantName string, wantPresent bool, wantPa
 				}
 			}
 			log.Printf("metadata partition: topic=%s partition=%d error_code=%d leader_id=%d replicas=%d isr=%d", name, partitionIndex, partitionErrorCode, leaderID, replicaCount, isrCount)
-			if partitionErrorCode != 0 || leaderID != 1 {
+			if partitionErrorCode != 0 {
 				topicHasExpectedLeaders = false
 			}
 		}
@@ -1712,4 +1742,40 @@ func checkMetadataTopic(conn net.Conn, wantName string, wantPresent bool, wantPa
 	if !wantPresent && foundTopic {
 		log.Fatal("Metadata response still includes deleted topic " + wantName)
 	}
+}
+
+func readMetadataBrokers(dec *protocol.Decoder) []metadataBroker {
+	brokerCount, err := dec.ReadArrayLen()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read broker count: %w", err))
+	}
+	brokers := make([]metadataBroker, 0, brokerCount)
+	for i := 0; i < brokerCount; i++ {
+		nodeID, err := dec.ReadInt32()
+		if err != nil {
+			log.Fatal(fmt.Errorf("read broker node_id: %w", err))
+		}
+		host, err := dec.ReadString()
+		if err != nil {
+			log.Fatal(fmt.Errorf("read broker host: %w", err))
+		}
+		port, err := dec.ReadInt32()
+		if err != nil {
+			log.Fatal(fmt.Errorf("read broker port: %w", err))
+		}
+		brokers = append(brokers, metadataBroker{id: nodeID, host: host, port: port})
+	}
+	return brokers
+}
+
+func equalMetadataBrokers(a []metadataBroker, b []metadataBroker) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 
+	"github.com/sorenhoang/gokaf/internal/cluster"
 	"github.com/sorenhoang/gokaf/internal/group"
 	"github.com/sorenhoang/gokaf/internal/offset"
 	"github.com/sorenhoang/gokaf/internal/producer"
@@ -45,6 +46,7 @@ type Broker struct {
 	Groups    *group.Coordinator
 	Offsets   *offset.Store
 	Producers *producer.Manager
+	Cluster   *cluster.Membership
 }
 
 func (b *Broker) Dispatch(conn net.Conn, payload []byte) error {

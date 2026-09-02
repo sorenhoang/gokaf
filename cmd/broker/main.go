@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sorenhoang/gokaf/internal/cluster"
 	"github.com/sorenhoang/gokaf/internal/group"
 	"github.com/sorenhoang/gokaf/internal/network"
 	"github.com/sorenhoang/gokaf/internal/offset"
@@ -21,17 +22,28 @@ import (
 )
 
 func main() {
+	id := flag.Int("id", 1, "broker id")
+	port := flag.Int("port", 9092, "listen port")
+	peers := flag.String("peers", "", "comma-separated id@host:port for every broker, including this one")
 	dataDir := flag.String("data", "./data", "directory for partition log segments")
 	flag.Parse()
 
+	nodeID := int32(*id)
+	brokerPort := int32(*port)
+	membership, err := cluster.ParseMembership(*peers, nodeID, "localhost", brokerPort)
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	broker := &network.Broker{
-		NodeID:    1,
+		NodeID:    nodeID,
 		Host:      "localhost",
-		Port:      9092,
+		Port:      brokerPort,
 		Topics:    topic.NewRegistry(),
 		Logs:      storage.NewManager(*dataDir),
 		Groups:    group.NewCoordinator(3 * time.Second),
 		Producers: producer.NewManager(),
+		Cluster:   membership,
 	}
 	offsetLog, err := broker.Logs.Log("__consumer_offsets", 0)
 	if err != nil {
@@ -45,17 +57,17 @@ func main() {
 	broker.Topics.Add(topic.Topic{
 		Name: "payments",
 		Partitions: []topic.Partition{
-			{ID: 0, Leader: 1, Replicas: []int32{1}, ISR: []int32{1}},
+			{ID: 0, Leader: nodeID, Replicas: []int32{nodeID}, ISR: []int32{nodeID}},
 		},
 	})
 	loadTopicsFromDataDir(broker, *dataDir)
 
-	listener, err := net.Listen("tcp", ":9092")
+	listener, err := net.Listen("tcp", ":"+strconv.Itoa(*port))
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	log.Printf("broker listening on :9092 data_dir=%s", *dataDir)
+	log.Printf("broker listening on :%d data_dir=%s", *port, *dataDir)
 
 	for {
 		conn, err := listener.Accept()

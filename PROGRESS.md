@@ -70,7 +70,7 @@ not "done." Update this file as phases complete; keep `CLAUDE.md`'s
 
 ## Track D — Multi-Broker & Replication (Phases 17–21)
 
-- [ ] **Phase 17** — Multi-broker bootstrap
+- [x] **Phase 17** — Multi-broker bootstrap
       AC: 3 brokers started together → each broker's Metadata response
       correctly lists all 3 (id, host, port).
 - [ ] **Phase 18** — Partition leader assignment across brokers
