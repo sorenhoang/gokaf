@@ -39,11 +39,9 @@ func TestHandleCreateTopicsAssignsPartitionLeadersAcrossCluster(t *testing.T) {
 	}
 	broker := &Broker{NodeID: 1, Topics: topic.NewRegistry(), Cluster: membership}
 
-	body, err := broker.handleCreateTopics(protocol.RequestHeader{APIKey: 19, APIVersion: 0}, createTopicsRequest("orders", 6, 1))
-	if err != nil {
-		t.Fatalf("handleCreateTopics: unexpected error: %v", err)
+	if code := broker.createTopic("orders", 6, 1, false); code != protocol.ErrNone {
+		t.Fatalf("createTopic code=%d, want 0", code)
 	}
-	assertTopicResult(t, body, "orders", protocol.ErrNone)
 
 	created, ok := broker.Topics.Get("orders")
 	if !ok {
@@ -53,6 +51,29 @@ func TestHandleCreateTopicsAssignsPartitionLeadersAcrossCluster(t *testing.T) {
 	for i, partition := range created.Partitions {
 		if partition.Leader != wantLeaders[i] || len(partition.Replicas) != 1 || partition.Replicas[0] != wantLeaders[i] || len(partition.ISR) != 1 || partition.ISR[0] != wantLeaders[i] {
 			t.Fatalf("partition %d = %+v, want leader/replica/isr %d", i, partition, wantLeaders[i])
+		}
+	}
+}
+
+func TestHandleCreateTopicsAssignsReplicasAcrossCluster(t *testing.T) {
+	membership, err := cluster.ParseMembership("1@localhost:9092,2@localhost:9093,3@localhost:9094", 1, "localhost", 9092)
+	if err != nil {
+		t.Fatalf("ParseMembership: unexpected error: %v", err)
+	}
+	broker := &Broker{NodeID: 1, Topics: topic.NewRegistry(), Cluster: membership}
+
+	if code := broker.createTopic("orders", 3, 3, false); code != protocol.ErrNone {
+		t.Fatalf("createTopic code=%d, want 0", code)
+	}
+
+	created, ok := broker.Topics.Get("orders")
+	if !ok {
+		t.Fatal("created topic was not added to registry")
+	}
+	wantReplicas := [][]int32{{1, 2, 3}, {2, 3, 1}, {3, 1, 2}}
+	for i, partition := range created.Partitions {
+		if partition.Leader != wantReplicas[i][0] || !sameInt32s(partition.Replicas, wantReplicas[i]) || !sameInt32s(partition.ISR, wantReplicas[i]) {
+			t.Fatalf("partition %d = %+v, want leader=%d replicas/isr=%v", i, partition, wantReplicas[i][0], wantReplicas[i])
 		}
 	}
 }
@@ -81,7 +102,18 @@ func TestHandleCreateTopicsMapsValidationErrors(t *testing.T) {
 		assertTopicResult(t, body, "orders", protocol.ErrInvalidPartitions)
 	})
 
-	t.Run("invalid replication factor", func(t *testing.T) {
+	t.Run("invalid replication factor zero", func(t *testing.T) {
+		broker := &Broker{NodeID: 1, Topics: topic.NewRegistry()}
+
+		body, err := broker.handleCreateTopics(protocol.RequestHeader{APIKey: 19, APIVersion: 0}, createTopicsRequest("orders", 3, 0))
+		if err != nil {
+			t.Fatalf("handleCreateTopics: unexpected error: %v", err)
+		}
+
+		assertTopicResult(t, body, "orders", protocol.ErrInvalidReplicationFactor)
+	})
+
+	t.Run("invalid replication factor greater than brokers", func(t *testing.T) {
 		broker := &Broker{NodeID: 1, Topics: topic.NewRegistry()}
 
 		body, err := broker.handleCreateTopics(protocol.RequestHeader{APIKey: 19, APIVersion: 0}, createTopicsRequest("orders", 3, 2))
@@ -133,4 +165,16 @@ func assertTopicResult(t *testing.T, body []byte, wantName string, wantCode int1
 	if name != wantName || code != wantCode {
 		t.Fatalf("topic result: got {%q, %d}, want {%q, %d}", name, code, wantName, wantCode)
 	}
+}
+
+func sameInt32s(a []int32, b []int32) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

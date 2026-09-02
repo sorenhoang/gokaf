@@ -17,6 +17,7 @@ import (
 	"github.com/sorenhoang/gokaf/internal/network"
 	"github.com/sorenhoang/gokaf/internal/offset"
 	"github.com/sorenhoang/gokaf/internal/producer"
+	"github.com/sorenhoang/gokaf/internal/replication"
 	"github.com/sorenhoang/gokaf/internal/storage"
 	"github.com/sorenhoang/gokaf/internal/topic"
 )
@@ -45,6 +46,8 @@ func main() {
 		Producers: producer.NewManager(),
 		Cluster:   membership,
 	}
+	broker.Replication = replication.NewManager(nodeID, broker.Logs, membership, 200*time.Millisecond)
+	defer broker.Replication.StopAll()
 	offsetLog, err := broker.Logs.Log("__consumer_offsets", 0)
 	if err != nil {
 		log.Fatal(err)
@@ -54,13 +57,10 @@ func main() {
 		log.Fatal(err)
 	}
 	defer broker.Logs.Close()
-	broker.Topics.Add(topic.Topic{
-		Name: "payments",
-		Partitions: []topic.Partition{
-			{ID: 0, Leader: nodeID, Replicas: []int32{nodeID}, ISR: []int32{nodeID}},
-		},
-	})
 	loadTopicsFromDataDir(broker, *dataDir)
+	for _, t := range broker.Topics.All() {
+		broker.Replication.StartFollowing(t)
+	}
 
 	listener, err := net.Listen("tcp", ":"+strconv.Itoa(*port))
 	if err != nil {
@@ -85,9 +85,11 @@ func main() {
 //
 // ponytail: stopgap until topic metadata is persisted properly. It only sees
 // partitions that were actually written to (a 3-partition topic produced to
-// only partition 0 comes back with 1 partition), and it resurrects a topic
-// that was deleted while its segments still exist on disk. Good enough for
-// manual restart checks; a real metadata log replaces it.
+// only partition 0 comes back with 1 partition), resurrects a topic that was
+// deleted while its segments still exist on disk, and rebuilds every partition
+// as a single self-led replica — so after a restart a follower stops
+// replicating and thinks it owns its local copy. Good enough for manual
+// restart checks; the Phase 23 metadata log replaces it.
 func loadTopicsFromDataDir(broker *network.Broker, dataDir string) {
 	entries, err := os.ReadDir(dataDir)
 	if err != nil {

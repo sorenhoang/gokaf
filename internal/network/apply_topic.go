@@ -31,6 +31,9 @@ func (b *Broker) handleApplyTopic(header protocol.RequestHeader, body []byte) ([
 	case err != nil:
 		code = protocol.ErrUnknown
 	}
+	if code == protocol.ErrNone && b.Replication != nil {
+		b.Replication.StartFollowing(topic.Topic{Name: name, Partitions: partitions})
+	}
 
 	e := protocol.NewEncoder()
 	writeTopicResults(e, []topicResult{{name: name, code: code}})

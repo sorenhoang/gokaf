@@ -44,7 +44,7 @@ delegating it to Claude. Behave accordingly:
 
 ## Current status
 
-Phases 0–18 done. Next up: **Phase 19 — ReplicaFetcher — follower replication** (Track D).
+Phases 0–19 done. Next up: **Phase 20 — ISR tracking + high-watermark + acks=all** (Track D).
 
 Full checklist with acceptance criteria per phase: [PROGRESS.md](PROGRESS.md).
 Update both this line and the matching checkbox in PROGRESS.md as phases

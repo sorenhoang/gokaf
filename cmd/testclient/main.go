@@ -19,9 +19,10 @@ import (
 )
 
 func main() {
-	mode := flag.String("mode", "full", "test mode: full, produce-fetch, fetch-only, multi-partition, metadata-cluster, metadata-leaders, metadata-leaders-check, find-coordinator, consumer-group, consumer-group-rebalance, consumer-group-roundrobin, offset-commit-fetch, offset-commit, offset-fetch, idempotent-producer")
+	mode := flag.String("mode", "full", "test mode: full, produce-fetch, fetch-only, multi-partition, metadata-cluster, metadata-leaders, metadata-leaders-check, replica-sync, find-coordinator, consumer-group, consumer-group-rebalance, consumer-group-roundrobin, offset-commit-fetch, offset-commit, offset-fetch, idempotent-producer")
 	addr := flag.String("addr", "localhost:9092", "broker address")
 	topicFlag := flag.String("topic", "", "topic name for targeted test modes")
+	n := flag.Int("n", 10, "record count for targeted test modes")
 	flag.Parse()
 
 	conn, err := net.Dial("tcp", *addr)
@@ -65,6 +66,8 @@ func main() {
 			log.Fatal("-topic is required for metadata-leaders-check")
 		}
 		checkMetadataLeaderCounts(conn, *topicFlag, 179)
+	case "replica-sync":
+		checkReplicaSync(conn, *topicFlag, *n)
 	case "find-coordinator":
 		checkFindCoordinator(conn, "group-a", 100)
 		checkFindCoordinator(conn, "anything", 101)
@@ -1065,6 +1068,10 @@ func checkCreateTopics(conn net.Conn, correlationID int32, wantCode int16) {
 }
 
 func checkCreateTopic(conn net.Conn, name string, partitions int32, correlationID int32, wantCode int16) {
+	checkCreateTopicWithReplicationFactor(conn, name, partitions, 1, correlationID, wantCode)
+}
+
+func checkCreateTopicWithReplicationFactor(conn net.Conn, name string, partitions int32, replicationFactor int16, correlationID int32, wantCode int16) {
 	header := protocol.RequestHeader{
 		APIKey:        19,
 		APIVersion:    0,
@@ -1077,7 +1084,7 @@ func checkCreateTopic(conn net.Conn, name string, partitions int32, correlationI
 	e.WriteArrayLen(1)
 	e.WriteString(name)
 	e.WriteInt32(partitions)
-	e.WriteInt16(1)
+	e.WriteInt16(replicationFactor)
 	e.WriteArrayLen(0)
 	e.WriteArrayLen(0)
 	e.WriteInt32(5000)
@@ -1241,6 +1248,26 @@ func checkFetch(conn net.Conn) {
 }
 
 func checkFetchFromPartition(conn net.Conn, topic string, partition int32, offset int64, correlationID int32, wantHighWatermark int64, wantValues []string) {
+	highWatermark, values, errorCode, err := fetchPartitionValues(conn, topic, partition, offset, correlationID)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("fetch response: topic=%s partition=%d error_code=%d high_watermark=%d values=%v", topic, partition, errorCode, highWatermark, values)
+	if errorCode != 0 || highWatermark != wantHighWatermark {
+		log.Fatal("unexpected Fetch partition response")
+	}
+	if len(values) != len(wantValues) {
+		log.Fatal("unexpected Fetch value count=" + strconv.Itoa(len(values)))
+	}
+	for i, value := range values {
+		want := wantValues[i]
+		if value != want {
+			log.Fatal("unexpected Fetch value at " + strconv.Itoa(i) + ": got " + value + " want " + want)
+		}
+	}
+}
+
+func fetchPartitionValues(conn net.Conn, topic string, partition int32, offset int64, correlationID int32) (int64, []string, int16, error) {
 	header := protocol.RequestHeader{
 		APIKey:        1,
 		APIVersion:    0,
@@ -1260,69 +1287,60 @@ func checkFetchFromPartition(conn net.Conn, topic string, partition int32, offse
 	e.WriteInt64(offset)
 	e.WriteInt32(1 << 20)
 	if err := network.WriteFrame(conn, e.Bytes()); err != nil {
-		log.Fatal(err)
+		return 0, nil, 0, err
 	}
 
 	respPayload, err := network.ReadFrame(conn)
 	if err != nil {
-		log.Fatal(err)
+		return 0, nil, 0, err
 	}
 	dec := protocol.NewDecoder(bytes.NewReader(respPayload))
 	respHeader, err := protocol.ReadResponseHeader(dec)
 	if err != nil {
-		log.Fatal(err)
+		return 0, nil, 0, err
 	}
 	if respHeader.CorrelationID != correlationID {
-		log.Fatal("unexpected Fetch correlation_id=" + strconv.Itoa(int(respHeader.CorrelationID)))
+		return 0, nil, 0, fmt.Errorf("unexpected Fetch correlation_id=%d", respHeader.CorrelationID)
 	}
 	topicCount, err := dec.ReadArrayLen()
 	if err != nil {
-		log.Fatal(fmt.Errorf("read fetch topic count: %w", err))
+		return 0, nil, 0, fmt.Errorf("read fetch topic count: %w", err)
 	}
 	if topicCount != 1 {
-		log.Fatal("unexpected Fetch topic count=" + strconv.Itoa(topicCount))
+		return 0, nil, 0, fmt.Errorf("unexpected Fetch topic count=%d", topicCount)
 	}
 	topicName, err := dec.ReadString()
 	if err != nil {
-		log.Fatal(fmt.Errorf("read fetch topic name: %w", err))
+		return 0, nil, 0, fmt.Errorf("read fetch topic name: %w", err)
 	}
 	partitionCount, err := dec.ReadArrayLen()
 	if err != nil {
-		log.Fatal(fmt.Errorf("read fetch partition count: %w", err))
+		return 0, nil, 0, fmt.Errorf("read fetch partition count: %w", err)
 	}
 	if topicName != topic || partitionCount != 1 {
-		log.Fatal("unexpected Fetch topic response")
+		return 0, nil, 0, fmt.Errorf("unexpected Fetch topic response")
 	}
 	gotPartition, err := dec.ReadInt32()
 	if err != nil {
-		log.Fatal(fmt.Errorf("read fetch partition: %w", err))
+		return 0, nil, 0, fmt.Errorf("read fetch partition: %w", err)
 	}
 	errorCode, err := dec.ReadInt16()
 	if err != nil {
-		log.Fatal(fmt.Errorf("read fetch error_code: %w", err))
+		return 0, nil, 0, fmt.Errorf("read fetch error_code: %w", err)
 	}
 	highWatermark, err := dec.ReadInt64()
 	if err != nil {
-		log.Fatal(fmt.Errorf("read fetch high_watermark: %w", err))
+		return 0, nil, 0, fmt.Errorf("read fetch high_watermark: %w", err)
 	}
 	recordSet, err := dec.ReadBytes()
 	if err != nil {
-		log.Fatal(fmt.Errorf("read fetch records: %w", err))
+		return 0, nil, 0, fmt.Errorf("read fetch records: %w", err)
 	}
 	values := decodeRecordSet(recordSet)
-	log.Printf("fetch response: topic=%s partition=%d error_code=%d high_watermark=%d values=%v", topicName, gotPartition, errorCode, highWatermark, values)
-	if gotPartition != partition || errorCode != 0 || highWatermark != wantHighWatermark {
-		log.Fatal("unexpected Fetch partition response")
+	if gotPartition != partition {
+		return 0, nil, 0, fmt.Errorf("unexpected Fetch partition=%d", gotPartition)
 	}
-	if len(values) != len(wantValues) {
-		log.Fatal("unexpected Fetch value count=" + strconv.Itoa(len(values)))
-	}
-	for i, value := range values {
-		want := wantValues[i]
-		if value != want {
-			log.Fatal("unexpected Fetch value at " + strconv.Itoa(i) + ": got " + value + " want " + want)
-		}
-	}
+	return highWatermark, values, errorCode, nil
 }
 
 func checkListOffsets(conn net.Conn, topic string, partition int32, timestamp int64, correlationID int32, wantOffset int64) int64 {
@@ -1653,6 +1671,51 @@ func checkMetadataLeaders(conn net.Conn, topicName string) {
 	checkMetadataLeaderCounts(conn, topicName, 179)
 }
 
+func checkReplicaSync(conn net.Conn, topicName string, count int) {
+	if topicName == "" {
+		topicName = "repl-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	}
+	checkCreateTopicWithReplicationFactor(conn, topicName, 1, 3, 180, 0)
+
+	want := make([]string, count)
+	for i := 0; i < count; i++ {
+		want[i] = fmt.Sprintf("msg-%d", i)
+		checkProduceToPartition(conn, topicName, 0, want[i], int32(181+i), int64(i))
+	}
+
+	for _, addr := range []string{"localhost:9092", "localhost:9093", "localhost:9094"} {
+		waitForReplicaFetch(addr, topicName, int64(count), want)
+	}
+}
+
+func waitForReplicaFetch(addr string, topicName string, wantHighWatermark int64, wantValues []string) {
+	deadline := time.Now().Add(5 * time.Second)
+	var lastHighWatermark int64
+	var lastValues []string
+	for time.Now().Before(deadline) {
+		conn, err := net.Dial("tcp", addr)
+		if err != nil {
+			log.Printf("replica fetch dial %s: %v", addr, err)
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+		highWatermark, values, errorCode, err := fetchPartitionValues(conn, topicName, 0, 0, 220)
+		conn.Close()
+		if err != nil {
+			log.Printf("replica fetch %s: %v", addr, err)
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+		lastHighWatermark, lastValues = highWatermark, values
+		if errorCode == 0 && highWatermark == wantHighWatermark && equalStrings(values, wantValues) {
+			log.Printf("replica synced: addr=%s topic=%s high_watermark=%d values=%v", addr, topicName, highWatermark, values)
+			return
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	log.Fatal("replica did not sync: addr=" + addr + " high_watermark=" + strconv.Itoa(int(lastHighWatermark)) + " values=" + fmt.Sprint(lastValues))
+}
+
 func checkMetadataLeaderCounts(conn net.Conn, topicName string, correlationID int32) {
 	leaderCounts := fetchMetadataLeaderCounts(conn, topicName, correlationID)
 	want := map[int32]int{1: 2, 2: 2, 3: 2}
@@ -1869,6 +1932,18 @@ func equalLeaderCounts(a map[int32]int, b map[int32]int) bool {
 	}
 	for id, aCount := range a {
 		if b[id] != aCount {
+			return false
+		}
+	}
+	return true
+}
+
+func equalStrings(a []string, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
 			return false
 		}
 	}

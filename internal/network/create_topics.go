@@ -57,20 +57,20 @@ func (b *Broker) createTopic(name string, numPartitions int32, replicationFactor
 	if numPartitions <= 0 {
 		return protocol.ErrInvalidPartitions
 	}
-	if replicationFactor <= 0 || replicationFactor > 1 {
+	brokerIDs := b.brokerIDs()
+	if replicationFactor <= 0 || int(replicationFactor) > len(brokerIDs) {
 		return protocol.ErrInvalidReplicationFactor
 	}
 
-	brokerIDs := b.brokerIDs()
-	leaders := topic.AssignLeaders(numPartitions, brokerIDs)
+	replicas := topic.AssignReplicas(numPartitions, brokerIDs, int(replicationFactor))
 	partitions := make([]topic.Partition, numPartitions)
 	for i := range partitions {
-		leader := leaders[i]
+		partitionReplicas := replicas[i]
 		partitions[i] = topic.Partition{
 			ID:       int32(i),
-			Leader:   leader,
-			Replicas: []int32{leader},
-			ISR:      []int32{leader},
+			Leader:   partitionReplicas[0],
+			Replicas: partitionReplicas,
+			ISR:      partitionReplicas,
 		}
 	}
 
@@ -81,6 +81,10 @@ func (b *Broker) createTopic(name string, numPartitions int32, replicationFactor
 	case err != nil:
 		return protocol.ErrUnknown
 	default:
+		t := topic.Topic{Name: name, Partitions: partitions}
+		if b.Replication != nil {
+			b.Replication.StartFollowing(t)
+		}
 		if fanOut {
 			b.fanOutTopic(name, partitions)
 		}

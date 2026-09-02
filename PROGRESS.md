@@ -76,7 +76,7 @@ not "done." Update this file as phases complete; keep `CLAUDE.md`'s
 - [x] **Phase 18** — Partition leader assignment across brokers
       AC: Create a topic with 6 partitions on a 3-broker cluster → leaders
       are evenly spread, 2 partitions per broker.
-- [ ] **Phase 19** — ReplicaFetcher — follower replication
+- [x] **Phase 19** — ReplicaFetcher — follower replication
       AC: Produce to the leader → within a few seconds, the follower
       brokers' log files have matching checksums.
 - [ ] **Phase 20** — ISR tracking + high-watermark + acks=all
