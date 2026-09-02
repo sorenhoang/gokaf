@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/sorenhoang/gokaf/internal/producer"
 	"github.com/sorenhoang/gokaf/internal/protocol"
 	"github.com/sorenhoang/gokaf/internal/storage"
 	"github.com/sorenhoang/gokaf/internal/topic"
@@ -41,6 +42,39 @@ func TestHandleProduceAssignsNextBaseOffset(t *testing.T) {
 
 	assertProduceResult(t, first, "orders", 0, protocol.ErrNone, 0)
 	assertProduceResult(t, second, "orders", 0, protocol.ErrNone, 1)
+}
+
+func TestHandleProduceDeduplicatesIdempotentRetry(t *testing.T) {
+	broker := newProduceTestBroker(t.TempDir())
+	batch := buildRecordBatch(t, "dup-me")
+	stampProducerFields(batch, 1, 0, 0)
+
+	first, err := broker.handleProduce(protocol.RequestHeader{APIKey: 0, APIVersion: 0}, produceRequest("orders", 0, batch))
+	if err != nil {
+		t.Fatalf("handleProduce first: unexpected error: %v", err)
+	}
+	second, err := broker.handleProduce(protocol.RequestHeader{APIKey: 0, APIVersion: 0}, produceRequest("orders", 0, batch))
+	if err != nil {
+		t.Fatalf("handleProduce retry: unexpected error: %v", err)
+	}
+
+	assertProduceResult(t, first, "orders", 0, protocol.ErrNone, 0)
+	assertProduceResult(t, second, "orders", 0, protocol.ErrNone, 0)
+	assertLogRecordCount(t, broker, "orders", 0, 1)
+}
+
+func TestHandleProduceRejectsOutOfOrderSequence(t *testing.T) {
+	broker := newProduceTestBroker(t.TempDir())
+	batch := buildRecordBatch(t, "gap")
+	stampProducerFields(batch, 1, 0, 5)
+
+	body, err := broker.handleProduce(protocol.RequestHeader{APIKey: 0, APIVersion: 0}, produceRequest("orders", 0, batch))
+	if err != nil {
+		t.Fatalf("handleProduce: unexpected error: %v", err)
+	}
+
+	assertProduceResult(t, body, "orders", 0, protocol.ErrOutOfOrderSequenceNumber, -1)
+	assertLogRecordCount(t, broker, "orders", 0, 0)
 }
 
 func TestHandleProduceRejectsCorruptRecordBatch(t *testing.T) {
@@ -88,11 +122,12 @@ func newProduceTestBroker(dataDir string) *Broker {
 	})
 
 	return &Broker{
-		NodeID: 1,
-		Host:   "localhost",
-		Port:   9092,
-		Topics: registry,
-		Logs:   storage.NewManager(dataDir),
+		NodeID:    1,
+		Host:      "localhost",
+		Port:      9092,
+		Topics:    registry,
+		Logs:      storage.NewManager(dataDir),
+		Producers: producer.NewManager(),
 	}
 }
 
@@ -179,6 +214,30 @@ func assertStoredBatch(t *testing.T, path string, requestBatch []byte, wantBaseO
 	if gotCRC != wantCRC {
 		t.Fatalf("crc: got %d, want %d", gotCRC, wantCRC)
 	}
+}
+
+func assertLogRecordCount(t *testing.T, broker *Broker, topic string, partition int32, want int) {
+	t.Helper()
+
+	log, err := broker.Logs.Log(topic, partition)
+	if err != nil {
+		t.Fatalf("Log: unexpected error: %v", err)
+	}
+	records, err := log.Read(0, -1)
+	if err != nil {
+		t.Fatalf("Read: unexpected error: %v", err)
+	}
+	if len(records) != want {
+		t.Fatalf("record count: got %d, want %d", len(records), want)
+	}
+}
+
+func stampProducerFields(batch []byte, pid int64, epoch int16, baseSequence int32) {
+	putInt64(batch[43:51], pid)
+	putInt16(batch[51:53], epoch)
+	putInt32(batch[53:57], baseSequence)
+	crc := crc32.Checksum(batch[21:], crc32.MakeTable(crc32.Castagnoli))
+	binary.BigEndian.PutUint32(batch[17:21], crc)
 }
 
 func buildRecordBatch(t *testing.T, values ...string) []byte {

@@ -15,6 +15,7 @@ import (
 	"github.com/sorenhoang/gokaf/internal/group"
 	"github.com/sorenhoang/gokaf/internal/network"
 	"github.com/sorenhoang/gokaf/internal/offset"
+	"github.com/sorenhoang/gokaf/internal/producer"
 	"github.com/sorenhoang/gokaf/internal/storage"
 	"github.com/sorenhoang/gokaf/internal/topic"
 )
@@ -24,12 +25,13 @@ func main() {
 	flag.Parse()
 
 	broker := &network.Broker{
-		NodeID: 1,
-		Host:   "localhost",
-		Port:   9092,
-		Topics: topic.NewRegistry(),
-		Logs:   storage.NewManager(*dataDir),
-		Groups: group.NewCoordinator(3 * time.Second),
+		NodeID:    1,
+		Host:      "localhost",
+		Port:      9092,
+		Topics:    topic.NewRegistry(),
+		Logs:      storage.NewManager(*dataDir),
+		Groups:    group.NewCoordinator(3 * time.Second),
+		Producers: producer.NewManager(),
 	}
 	offsetLog, err := broker.Logs.Log("__consumer_offsets", 0)
 	if err != nil {

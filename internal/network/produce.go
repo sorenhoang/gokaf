@@ -6,6 +6,7 @@ import (
 	"hash/crc32"
 	"log"
 
+	"github.com/sorenhoang/gokaf/internal/producer"
 	"github.com/sorenhoang/gokaf/internal/protocol"
 )
 
@@ -87,9 +88,43 @@ func (b *Broker) producePartition(topicName string, partitionIndex int32, batch 
 		return response
 	}
 
+	pid := int64(binary.BigEndian.Uint64(batch[43:51]))
+	baseSeq := int32(binary.BigEndian.Uint32(batch[53:57]))
+	recordCount := int32(binary.BigEndian.Uint32(batch[57:61]))
 	partitionLog, err := b.Logs.Log(topicName, partitionIndex)
 	if err != nil {
 		log.Printf("produce %s-%d: open log: %v", topicName, partitionIndex, err)
+		return response
+	}
+
+	appendBatch := func() (int64, error) {
+		return partitionLog.AppendWithOffset(batch, func(offset int64) {
+			binary.BigEndian.PutUint64(batch[0:8], uint64(offset))
+		})
+	}
+
+	if pid >= 0 {
+		check, err := b.Producers.AppendBatch(pid, topicName, partitionIndex, baseSeq, recordCount, appendBatch)
+		if err != nil {
+			log.Printf("produce %s-%d: append: %v", topicName, partitionIndex, err)
+			return response
+		}
+		switch check.Decision {
+		case producer.Duplicate:
+			response.errorCode = protocol.ErrNone
+			response.baseOffset = check.CachedOffset
+		case producer.OutOfOrder:
+			response.errorCode = protocol.ErrOutOfOrderSequenceNumber
+			response.baseOffset = -1
+		case producer.Append:
+			response.errorCode = protocol.ErrNone
+			response.baseOffset = check.CachedOffset
+		default:
+			response.errorCode = protocol.ErrUnknown
+			response.baseOffset = -1
+		}
+		// An idempotent batch never falls through to the plain append below —
+		// AppendBatch already did (or refused) the write under the PID lock.
 		return response
 	}
 

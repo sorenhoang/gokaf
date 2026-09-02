@@ -257,7 +257,7 @@
 
   <h2>Track C — Producer Reliability</h2>
   <ul>
-    <li><a href="#phase-16">Phase 16 — Idempotent producer</a></li>
+    <li class="done"><a href="#phase-16">Phase 16 — Idempotent producer</a></li>
   </ul>
 
   <h2>Track D — Replication</h2>
@@ -516,7 +516,7 @@
     </div>
     <p class="track-note">Idempotency at the partition level — the real mechanism behind Kafka's exactly-once-per-partition guarantee.</p>
 
-    <div class="phase" id="phase-16">
+    <div class="phase done" id="phase-16">
       <h3><span class="phase-id">Phase 16</span> InitProducerId (key=22) + idempotent producer</h3>
       <dl>
         <dt>Output</dt><dd>A PID manager assigns <code>producer_id</code>/<code>producer_epoch</code> per producer session. The broker tracks <code>(producer_id, partition) → last_sequence</code> to deduplicate — a repeated sequence number is silently dropped instead of re-appended.</dd>

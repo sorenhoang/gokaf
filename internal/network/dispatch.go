@@ -8,6 +8,7 @@ import (
 
 	"github.com/sorenhoang/gokaf/internal/group"
 	"github.com/sorenhoang/gokaf/internal/offset"
+	"github.com/sorenhoang/gokaf/internal/producer"
 	"github.com/sorenhoang/gokaf/internal/protocol"
 	"github.com/sorenhoang/gokaf/internal/storage"
 	"github.com/sorenhoang/gokaf/internal/topic"
@@ -32,16 +33,18 @@ var dispatchTable = map[int16]handlerFunc{
 	18: (*Broker).handleApiVersions,
 	19: (*Broker).handleCreateTopics,
 	20: (*Broker).handleDeleteTopics,
+	22: (*Broker).handleInitProducerID,
 }
 
 type Broker struct {
-	NodeID  int32
-	Host    string
-	Port    int32
-	Topics  *topic.Registry
-	Logs    *storage.Manager
-	Groups  *group.Coordinator
-	Offsets *offset.Store
+	NodeID    int32
+	Host      string
+	Port      int32
+	Topics    *topic.Registry
+	Logs      *storage.Manager
+	Groups    *group.Coordinator
+	Offsets   *offset.Store
+	Producers *producer.Manager
 }
 
 func (b *Broker) Dispatch(conn net.Conn, payload []byte) error {

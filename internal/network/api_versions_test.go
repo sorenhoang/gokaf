@@ -28,8 +28,8 @@ func TestHandleApiVersionsWritesV0ResponseBody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadArrayLen api keys: unexpected error: %v", err)
 	}
-	if apiCount != 14 {
-		t.Fatalf("api key count: got %d, want 14", apiCount)
+	if apiCount != 15 {
+		t.Fatalf("api key count: got %d, want 15", apiCount)
 	}
 
 	foundProduce := false
@@ -46,6 +46,7 @@ func TestHandleApiVersionsWritesV0ResponseBody(t *testing.T) {
 	foundApiVersions := false
 	foundCreateTopics := false
 	foundDeleteTopics := false
+	foundInitProducerID := false
 	for i := 0; i < apiCount; i++ {
 		apiKey, minVersion, maxVersion := readAPIVersionEntry(t, dec)
 		if apiKey == 0 && minVersion == 0 && maxVersion == 0 {
@@ -90,10 +91,13 @@ func TestHandleApiVersionsWritesV0ResponseBody(t *testing.T) {
 		if apiKey == 20 && minVersion == 0 && maxVersion == 0 {
 			foundDeleteTopics = true
 		}
+		if apiKey == 22 && minVersion == 0 && maxVersion == 0 {
+			foundInitProducerID = true
+		}
 	}
-	if !foundProduce || !foundFetch || !foundListOffsets || !foundMetadata || !foundOffsetCommit || !foundOffsetFetch || !foundFindCoordinator || !foundJoinGroup || !foundHeartbeat || !foundLeaveGroup || !foundSyncGroup || !foundApiVersions || !foundCreateTopics || !foundDeleteTopics {
-		t.Fatalf("api versions: found_produce=%t found_fetch=%t found_list_offsets=%t found_metadata=%t found_offset_commit=%t found_offset_fetch=%t found_find_coordinator=%t found_join_group=%t found_heartbeat=%t found_leave_group=%t found_sync_group=%t found_api_versions=%t found_create_topics=%t found_delete_topics=%t, want all true",
-			foundProduce, foundFetch, foundListOffsets, foundMetadata, foundOffsetCommit, foundOffsetFetch, foundFindCoordinator, foundJoinGroup, foundHeartbeat, foundLeaveGroup, foundSyncGroup, foundApiVersions, foundCreateTopics, foundDeleteTopics)
+	if !foundProduce || !foundFetch || !foundListOffsets || !foundMetadata || !foundOffsetCommit || !foundOffsetFetch || !foundFindCoordinator || !foundJoinGroup || !foundHeartbeat || !foundLeaveGroup || !foundSyncGroup || !foundApiVersions || !foundCreateTopics || !foundDeleteTopics || !foundInitProducerID {
+		t.Fatalf("api versions: found_produce=%t found_fetch=%t found_list_offsets=%t found_metadata=%t found_offset_commit=%t found_offset_fetch=%t found_find_coordinator=%t found_join_group=%t found_heartbeat=%t found_leave_group=%t found_sync_group=%t found_api_versions=%t found_create_topics=%t found_delete_topics=%t found_init_producer_id=%t, want all true",
+			foundProduce, foundFetch, foundListOffsets, foundMetadata, foundOffsetCommit, foundOffsetFetch, foundFindCoordinator, foundJoinGroup, foundHeartbeat, foundLeaveGroup, foundSyncGroup, foundApiVersions, foundCreateTopics, foundDeleteTopics, foundInitProducerID)
 	}
 }
 

@@ -19,7 +19,7 @@ import (
 )
 
 func main() {
-	mode := flag.String("mode", "full", "test mode: full, produce-fetch, fetch-only, multi-partition, find-coordinator, consumer-group, consumer-group-rebalance, consumer-group-roundrobin, offset-commit-fetch, offset-commit, offset-fetch")
+	mode := flag.String("mode", "full", "test mode: full, produce-fetch, fetch-only, multi-partition, find-coordinator, consumer-group, consumer-group-rebalance, consumer-group-roundrobin, offset-commit-fetch, offset-commit, offset-fetch, idempotent-producer")
 	flag.Parse()
 
 	conn, err := net.Dial("tcp", "localhost:9092")
@@ -70,6 +70,8 @@ func main() {
 		checkOffsetCommit(conn, 160, "offset-group", "offset-events", 0, 42)
 	case "offset-fetch":
 		checkOffsetFetch(conn, 161, "offset-group", "offset-events", 0, 42)
+	case "idempotent-producer":
+		checkIdempotentProducer(conn)
 	default:
 		log.Fatal("unknown mode: " + *mode)
 	}
@@ -152,6 +154,7 @@ func checkApiVersions(conn net.Conn) {
 	foundHeartbeat := false
 	foundLeaveGroup := false
 	foundSyncGroup := false
+	foundInitProducerID := false
 	for i := 0; i < apiCount; i++ {
 		apiKey, minVersion, maxVersion := readAPIVersionEntry(dec)
 		log.Printf("api_versions entry: api_key=%d min_version=%d max_version=%d", apiKey, minVersion, maxVersion)
@@ -182,11 +185,14 @@ func checkApiVersions(conn net.Conn) {
 		if apiKey == 18 && minVersion == 0 && maxVersion == 0 {
 			foundApiVersions = true
 		}
+		if apiKey == 22 && minVersion == 0 && maxVersion == 0 {
+			foundInitProducerID = true
+		}
 	}
 
 	log.Printf("api_versions response: correlation_id=%d error_code=%d api_count=%d", respHeader.CorrelationID, errorCode, apiCount)
-	if respHeader.CorrelationID != 43 || errorCode != 0 || !foundApiVersions || !foundListOffsets || !foundOffsetCommit || !foundOffsetFetch || !foundFindCoordinator || !foundJoinGroup || !foundHeartbeat || !foundLeaveGroup || !foundSyncGroup {
-		log.Fatal("unexpected ApiVersions response: correlation_id=" + strconv.Itoa(int(respHeader.CorrelationID)) + " error_code=" + strconv.Itoa(int(errorCode)) + " found_api_versions=" + strconv.FormatBool(foundApiVersions) + " found_list_offsets=" + strconv.FormatBool(foundListOffsets) + " found_offset_commit=" + strconv.FormatBool(foundOffsetCommit) + " found_offset_fetch=" + strconv.FormatBool(foundOffsetFetch) + " found_find_coordinator=" + strconv.FormatBool(foundFindCoordinator) + " found_join_group=" + strconv.FormatBool(foundJoinGroup) + " found_heartbeat=" + strconv.FormatBool(foundHeartbeat) + " found_leave_group=" + strconv.FormatBool(foundLeaveGroup) + " found_sync_group=" + strconv.FormatBool(foundSyncGroup))
+	if respHeader.CorrelationID != 43 || errorCode != 0 || !foundApiVersions || !foundListOffsets || !foundOffsetCommit || !foundOffsetFetch || !foundFindCoordinator || !foundJoinGroup || !foundHeartbeat || !foundLeaveGroup || !foundSyncGroup || !foundInitProducerID {
+		log.Fatal("unexpected ApiVersions response: correlation_id=" + strconv.Itoa(int(respHeader.CorrelationID)) + " error_code=" + strconv.Itoa(int(errorCode)) + " found_api_versions=" + strconv.FormatBool(foundApiVersions) + " found_list_offsets=" + strconv.FormatBool(foundListOffsets) + " found_offset_commit=" + strconv.FormatBool(foundOffsetCommit) + " found_offset_fetch=" + strconv.FormatBool(foundOffsetFetch) + " found_find_coordinator=" + strconv.FormatBool(foundFindCoordinator) + " found_join_group=" + strconv.FormatBool(foundJoinGroup) + " found_heartbeat=" + strconv.FormatBool(foundHeartbeat) + " found_leave_group=" + strconv.FormatBool(foundLeaveGroup) + " found_sync_group=" + strconv.FormatBool(foundSyncGroup) + " found_init_producer_id=" + strconv.FormatBool(foundInitProducerID))
 	}
 }
 
@@ -236,6 +242,58 @@ func checkFindCoordinator(conn net.Conn, groupID string, correlationID int32) {
 	if respHeader.CorrelationID != correlationID || errorCode != 0 || nodeID != 1 || host != "localhost" || port != 9092 {
 		log.Fatal("unexpected FindCoordinator response")
 	}
+}
+
+func checkInitProducerID(conn net.Conn, correlationID int32) (int64, int16) {
+	header := protocol.RequestHeader{
+		APIKey:        22,
+		APIVersion:    0,
+		CorrelationID: correlationID,
+		ClientID:      nil,
+	}
+
+	e := protocol.NewEncoder()
+	protocol.WriteRequestHeader(e, header)
+	e.WriteNullableString(nil)
+	e.WriteInt32(-1)
+	if err := network.WriteFrame(conn, e.Bytes()); err != nil {
+		log.Fatal(err)
+	}
+
+	respPayload, err := network.ReadFrame(conn)
+	if err != nil {
+		log.Fatal(err)
+	}
+	dec := protocol.NewDecoder(bytes.NewReader(respPayload))
+	respHeader, err := protocol.ReadResponseHeader(dec)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if respHeader.CorrelationID != correlationID {
+		log.Fatal("unexpected InitProducerId correlation_id=" + strconv.Itoa(int(respHeader.CorrelationID)))
+	}
+	throttleTimeMS, err := dec.ReadInt32()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read init_producer_id throttle_time_ms: %w", err))
+	}
+	errorCode, err := dec.ReadInt16()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read init_producer_id error_code: %w", err))
+	}
+	pid, err := dec.ReadInt64()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read init_producer_id producer_id: %w", err))
+	}
+	epoch, err := dec.ReadInt16()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read init_producer_id producer_epoch: %w", err))
+	}
+
+	log.Printf("init_producer_id response: throttle_time_ms=%d error_code=%d producer_id=%d producer_epoch=%d", throttleTimeMS, errorCode, pid, epoch)
+	if throttleTimeMS != 0 || errorCode != 0 || pid < 0 || epoch != 0 {
+		log.Fatal("unexpected InitProducerId response")
+	}
+	return pid, epoch
 }
 
 func checkOffsetCommit(conn net.Conn, correlationID int32, groupID string, topic string, partition int32, offset int64) {
@@ -1056,8 +1114,14 @@ func checkProduce(conn net.Conn, value string, correlationID int32, wantBaseOffs
 }
 
 func checkProduceToPartition(conn net.Conn, topic string, partition int32, value string, correlationID int32, wantBaseOffset int64) {
-	batch := buildRecordBatch(value)
+	batch := buildRecordBatch(value, -1, -1, -1)
+	baseOffset, errorCode := produceRawBatch(conn, topic, partition, batch, correlationID)
+	if errorCode != 0 || baseOffset != wantBaseOffset {
+		log.Fatal("unexpected Produce response")
+	}
+}
 
+func produceRawBatch(conn net.Conn, topic string, partition int32, batch []byte, correlationID int32) (int64, int16) {
 	header := protocol.RequestHeader{
 		APIKey:        0,
 		APIVersion:    0,
@@ -1124,9 +1188,37 @@ func checkProduceToPartition(conn net.Conn, topic string, partition int32, value
 	}
 
 	log.Printf("produce response: topic=%s partition=%d error_code=%d base_offset=%d", topicName, gotPartition, errorCode, baseOffset)
-	if gotPartition != partition || errorCode != 0 || baseOffset != wantBaseOffset {
+	if gotPartition != partition {
 		log.Fatal("unexpected Produce response")
 	}
+	return baseOffset, errorCode
+}
+
+func checkIdempotentProducer(conn net.Conn) {
+	pid, epoch := checkInitProducerID(conn, 170)
+	topicName := "idem-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	checkCreateTopic(conn, topicName, 1, 171, 0)
+
+	batch := buildRecordBatch("dup-me", pid, epoch, 0)
+	firstOffset, firstCode := produceRawBatch(conn, topicName, 0, batch, 172)
+	secondOffset, secondCode := produceRawBatch(conn, topicName, 0, batch, 173)
+	if firstCode != 0 || secondCode != 0 || firstOffset != secondOffset {
+		log.Fatal("idempotent retry was not deduplicated")
+	}
+
+	secondBatch := buildRecordBatch("second", pid, epoch, 1)
+	nextOffset, nextCode := produceRawBatch(conn, topicName, 0, secondBatch, 174)
+	if nextCode != 0 || nextOffset != firstOffset+1 {
+		log.Fatal("idempotent next sequence did not append at the next offset")
+	}
+
+	gapBatch := buildRecordBatch("gap", pid, epoch, 5)
+	gapOffset, gapCode := produceRawBatch(conn, topicName, 0, gapBatch, 175)
+	if gapCode != 45 || gapOffset != -1 {
+		log.Fatal("out-of-order idempotent batch was not rejected")
+	}
+
+	checkFetchFromPartition(conn, topicName, 0, 0, 176, 2, []string{"dup-me", "second"})
 }
 
 func checkFetch(conn net.Conn) {
@@ -1352,7 +1444,7 @@ func writeAndAssertTopicResult(conn net.Conn, request []byte, correlationID int3
 	}
 }
 
-func buildRecordBatch(value string) []byte {
+func buildRecordBatch(value string, producerID int64, producerEpoch int16, baseSequence int32) []byte {
 	record := buildRecord(value)
 	batch := make([]byte, 61, 61+len(record))
 
@@ -1363,9 +1455,9 @@ func buildRecordBatch(value string) []byte {
 	putInt32(batch[23:27], 0)
 	putInt64(batch[27:35], 1700000000000)
 	putInt64(batch[35:43], 1700000000000)
-	putInt64(batch[43:51], -1)
-	putInt16(batch[51:53], -1)
-	putInt32(batch[53:57], -1)
+	putInt64(batch[43:51], producerID)
+	putInt16(batch[51:53], producerEpoch)
+	putInt32(batch[53:57], baseSequence)
 	putInt32(batch[57:61], 1)
 	batch = append(batch, record...)
 

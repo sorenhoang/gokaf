@@ -64,7 +64,7 @@ not "done." Update this file as phases complete; keep `CLAUDE.md`'s
 
 ## Track C — Producer Reliability (Phase 16)
 
-- [ ] **Phase 16** — InitProducerId (key=22) + idempotent producer
+- [x] **Phase 16** — InitProducerId (key=22) + idempotent producer
       AC: Test client deliberately resends the same batch twice (simulating
       a retry after a timeout) → the log contains exactly one copy, not two.
 

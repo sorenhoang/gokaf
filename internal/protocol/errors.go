@@ -12,4 +12,5 @@ const (
 	ErrIllegalGeneration        int16 = 22
 	ErrUnknownMemberID          int16 = 25
 	ErrRebalanceInProgress      int16 = 27
+	ErrOutOfOrderSequenceNumber int16 = 45
 )

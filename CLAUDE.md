@@ -44,7 +44,7 @@ delegating it to Claude. Behave accordingly:
 
 ## Current status
 
-Phases 0–15 done. Track B complete. Next up: **Phase 16 — InitProducerId + idempotent producer** (Track C).
+Phases 0–16 done. Track C complete. Next up: **Phase 17 — Multi-broker bootstrap** (Track D).
 
 Full checklist with acceptance criteria per phase: [PROGRESS.md](PROGRESS.md).
 Update both this line and the matching checkbox in PROGRESS.md as phases
