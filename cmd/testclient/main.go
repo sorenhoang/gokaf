@@ -19,8 +19,9 @@ import (
 )
 
 func main() {
-	mode := flag.String("mode", "full", "test mode: full, produce-fetch, fetch-only, multi-partition, metadata-cluster, find-coordinator, consumer-group, consumer-group-rebalance, consumer-group-roundrobin, offset-commit-fetch, offset-commit, offset-fetch, idempotent-producer")
+	mode := flag.String("mode", "full", "test mode: full, produce-fetch, fetch-only, multi-partition, metadata-cluster, metadata-leaders, metadata-leaders-check, find-coordinator, consumer-group, consumer-group-rebalance, consumer-group-roundrobin, offset-commit-fetch, offset-commit, offset-fetch, idempotent-producer")
 	addr := flag.String("addr", "localhost:9092", "broker address")
+	topicFlag := flag.String("topic", "", "topic name for targeted test modes")
 	flag.Parse()
 
 	conn, err := net.Dial("tcp", *addr)
@@ -57,6 +58,13 @@ func main() {
 		checkMultiPartition(conn)
 	case "metadata-cluster":
 		checkMetadataCluster(conn)
+	case "metadata-leaders":
+		checkMetadataLeaders(conn, *topicFlag)
+	case "metadata-leaders-check":
+		if *topicFlag == "" {
+			log.Fatal("-topic is required for metadata-leaders-check")
+		}
+		checkMetadataLeaderCounts(conn, *topicFlag, 179)
 	case "find-coordinator":
 		checkFindCoordinator(conn, "group-a", 100)
 		checkFindCoordinator(conn, "anything", 101)
@@ -1637,6 +1645,23 @@ func checkMetadataCluster(conn net.Conn) {
 	log.Printf("metadata cluster brokers: %v", brokers)
 }
 
+func checkMetadataLeaders(conn net.Conn, topicName string) {
+	if topicName == "" {
+		topicName = "leader-events-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	}
+	checkCreateTopic(conn, topicName, 6, 178, 0)
+	checkMetadataLeaderCounts(conn, topicName, 179)
+}
+
+func checkMetadataLeaderCounts(conn net.Conn, topicName string, correlationID int32) {
+	leaderCounts := fetchMetadataLeaderCounts(conn, topicName, correlationID)
+	want := map[int32]int{1: 2, 2: 2, 3: 2}
+	if !equalLeaderCounts(leaderCounts, want) {
+		log.Fatal("unexpected metadata leader counts")
+	}
+	log.Printf("metadata leader counts: topic=%s counts=%v", topicName, leaderCounts)
+}
+
 func checkMetadataTopic(conn net.Conn, wantName string, wantPresent bool, wantPartitions int) {
 	header := protocol.RequestHeader{
 		APIKey:        3,
@@ -1742,6 +1767,112 @@ func checkMetadataTopic(conn net.Conn, wantName string, wantPresent bool, wantPa
 	if !wantPresent && foundTopic {
 		log.Fatal("Metadata response still includes deleted topic " + wantName)
 	}
+}
+
+func fetchMetadataLeaderCounts(conn net.Conn, topicName string, correlationID int32) map[int32]int {
+	header := protocol.RequestHeader{
+		APIKey:        3,
+		APIVersion:    0,
+		CorrelationID: correlationID,
+		ClientID:      nil,
+	}
+
+	e := protocol.NewEncoder()
+	protocol.WriteRequestHeader(e, header)
+	e.WriteArrayLen(0)
+	if err := network.WriteFrame(conn, e.Bytes()); err != nil {
+		log.Fatal(err)
+	}
+
+	respPayload, err := network.ReadFrame(conn)
+	if err != nil {
+		log.Fatal(err)
+	}
+	dec := protocol.NewDecoder(bytes.NewReader(respPayload))
+	respHeader, err := protocol.ReadResponseHeader(dec)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if respHeader.CorrelationID != correlationID {
+		log.Fatal("unexpected Metadata correlation_id=" + strconv.Itoa(int(respHeader.CorrelationID)))
+	}
+	brokers := readMetadataBrokers(dec)
+	if !equalMetadataBrokers(brokers, []metadataBroker{{id: 1, host: "localhost", port: 9092}, {id: 2, host: "localhost", port: 9093}, {id: 3, host: "localhost", port: 9094}}) {
+		log.Fatal("unexpected Metadata brokers for leader check")
+	}
+
+	topicCount, err := dec.ReadArrayLen()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read topic count: %w", err))
+	}
+	for i := 0; i < topicCount; i++ {
+		errorCode, err := dec.ReadInt16()
+		if err != nil {
+			log.Fatal(fmt.Errorf("read topic error_code: %w", err))
+		}
+		name, err := dec.ReadString()
+		if err != nil {
+			log.Fatal(fmt.Errorf("read topic name: %w", err))
+		}
+		partitionCount, err := dec.ReadArrayLen()
+		if err != nil {
+			log.Fatal(fmt.Errorf("read partition count: %w", err))
+		}
+		counts := map[int32]int{}
+		for j := 0; j < partitionCount; j++ {
+			partitionErrorCode, err := dec.ReadInt16()
+			if err != nil {
+				log.Fatal(fmt.Errorf("read partition error_code: %w", err))
+			}
+			partitionIndex, err := dec.ReadInt32()
+			if err != nil {
+				log.Fatal(fmt.Errorf("read partition index: %w", err))
+			}
+			leaderID, err := dec.ReadInt32()
+			if err != nil {
+				log.Fatal(fmt.Errorf("read partition leader_id: %w", err))
+			}
+			replicaCount, err := dec.ReadArrayLen()
+			if err != nil {
+				log.Fatal(fmt.Errorf("read replica count: %w", err))
+			}
+			for k := 0; k < replicaCount; k++ {
+				if _, err := dec.ReadInt32(); err != nil {
+					log.Fatal(fmt.Errorf("read replica node: %w", err))
+				}
+			}
+			isrCount, err := dec.ReadArrayLen()
+			if err != nil {
+				log.Fatal(fmt.Errorf("read isr count: %w", err))
+			}
+			for k := 0; k < isrCount; k++ {
+				if _, err := dec.ReadInt32(); err != nil {
+					log.Fatal(fmt.Errorf("read isr node: %w", err))
+				}
+			}
+			log.Printf("metadata leader: topic=%s partition=%d error_code=%d leader_id=%d", name, partitionIndex, partitionErrorCode, leaderID)
+			if partitionErrorCode == 0 {
+				counts[leaderID]++
+			}
+		}
+		if errorCode == 0 && name == topicName {
+			return counts
+		}
+	}
+	log.Fatal("Metadata response did not include expected topic " + topicName)
+	return nil
+}
+
+func equalLeaderCounts(a map[int32]int, b map[int32]int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for id, aCount := range a {
+		if b[id] != aCount {
+			return false
+		}
+	}
+	return true
 }
 
 func readMetadataBrokers(dec *protocol.Decoder) []metadataBroker {

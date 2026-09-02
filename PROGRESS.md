@@ -73,7 +73,7 @@ not "done." Update this file as phases complete; keep `CLAUDE.md`'s
 - [x] **Phase 17** — Multi-broker bootstrap
       AC: 3 brokers started together → each broker's Metadata response
       correctly lists all 3 (id, host, port).
-- [ ] **Phase 18** — Partition leader assignment across brokers
+- [x] **Phase 18** — Partition leader assignment across brokers
       AC: Create a topic with 6 partitions on a 3-broker cluster → leaders
       are evenly spread, 2 partitions per broker.
 - [ ] **Phase 19** — ReplicaFetcher — follower replication

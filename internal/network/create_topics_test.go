@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/sorenhoang/gokaf/internal/cluster"
 	"github.com/sorenhoang/gokaf/internal/protocol"
 	"github.com/sorenhoang/gokaf/internal/topic"
 )
@@ -27,6 +28,31 @@ func TestHandleCreateTopicsCreatesTopicWithGeneratedPartitions(t *testing.T) {
 	for i, p := range created.Partitions {
 		if p.ID != int32(i) || p.Leader != 1 || len(p.Replicas) != 1 || p.Replicas[0] != 1 || len(p.ISR) != 1 || p.ISR[0] != 1 {
 			t.Fatalf("partition %d: got %+v, want id=%d leader=1 replicas=[1] isr=[1]", i, p, i)
+		}
+	}
+}
+
+func TestHandleCreateTopicsAssignsPartitionLeadersAcrossCluster(t *testing.T) {
+	membership, err := cluster.ParseMembership("1@localhost:9092,2@localhost:9093,3@localhost:9094", 1, "localhost", 9092)
+	if err != nil {
+		t.Fatalf("ParseMembership: unexpected error: %v", err)
+	}
+	broker := &Broker{NodeID: 1, Topics: topic.NewRegistry(), Cluster: membership}
+
+	body, err := broker.handleCreateTopics(protocol.RequestHeader{APIKey: 19, APIVersion: 0}, createTopicsRequest("orders", 6, 1))
+	if err != nil {
+		t.Fatalf("handleCreateTopics: unexpected error: %v", err)
+	}
+	assertTopicResult(t, body, "orders", protocol.ErrNone)
+
+	created, ok := broker.Topics.Get("orders")
+	if !ok {
+		t.Fatal("created topic was not added to registry")
+	}
+	wantLeaders := []int32{1, 2, 3, 1, 2, 3}
+	for i, partition := range created.Partitions {
+		if partition.Leader != wantLeaders[i] || len(partition.Replicas) != 1 || partition.Replicas[0] != wantLeaders[i] || len(partition.ISR) != 1 || partition.ISR[0] != wantLeaders[i] {
+			t.Fatalf("partition %d = %+v, want leader/replica/isr %d", i, partition, wantLeaders[i])
 		}
 	}
 }

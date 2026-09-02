@@ -3,7 +3,9 @@ package network
 import (
 	"bytes"
 	"errors"
+	"log"
 
+	"github.com/sorenhoang/gokaf/internal/cluster"
 	"github.com/sorenhoang/gokaf/internal/protocol"
 	"github.com/sorenhoang/gokaf/internal/topic"
 )
@@ -38,7 +40,7 @@ func (b *Broker) handleCreateTopics(header protocol.RequestHeader, body []byte) 
 
 		results = append(results, topicResult{
 			name: name,
-			code: b.createTopic(name, numPartitions, replicationFactor),
+			code: b.createTopic(name, numPartitions, replicationFactor, true),
 		})
 	}
 
@@ -51,7 +53,7 @@ func (b *Broker) handleCreateTopics(header protocol.RequestHeader, body []byte) 
 	return e.Bytes(), nil
 }
 
-func (b *Broker) createTopic(name string, numPartitions int32, replicationFactor int16) int16 {
+func (b *Broker) createTopic(name string, numPartitions int32, replicationFactor int16, fanOut bool) int16 {
 	if numPartitions <= 0 {
 		return protocol.ErrInvalidPartitions
 	}
@@ -59,13 +61,16 @@ func (b *Broker) createTopic(name string, numPartitions int32, replicationFactor
 		return protocol.ErrInvalidReplicationFactor
 	}
 
+	brokerIDs := b.brokerIDs()
+	leaders := topic.AssignLeaders(numPartitions, brokerIDs)
 	partitions := make([]topic.Partition, numPartitions)
 	for i := range partitions {
+		leader := leaders[i]
 		partitions[i] = topic.Partition{
 			ID:       int32(i),
-			Leader:   b.NodeID,
-			Replicas: []int32{b.NodeID},
-			ISR:      []int32{b.NodeID},
+			Leader:   leader,
+			Replicas: []int32{leader},
+			ISR:      []int32{leader},
 		}
 	}
 
@@ -76,7 +81,45 @@ func (b *Broker) createTopic(name string, numPartitions int32, replicationFactor
 	case err != nil:
 		return protocol.ErrUnknown
 	default:
+		if fanOut {
+			b.fanOutTopic(name, partitions)
+		}
 		return protocol.ErrNone
+	}
+}
+
+func (b *Broker) brokerIDs() []int32 {
+	if b.Cluster == nil {
+		return []int32{b.NodeID}
+	}
+	brokers := b.Cluster.All()
+	ids := make([]int32, 0, len(brokers))
+	for _, broker := range brokers {
+		ids = append(ids, broker.ID)
+	}
+	return ids
+}
+
+// fanOutTopic pushes the just-created topic to every peer so their registries
+// (and Metadata responses) agree.
+//
+// ponytail: synchronous, best-effort, no retry. A peer that is down or slow
+// stalls the client's CreateTopics response and then silently misses the topic
+// until it is recreated. The Phase 23 metadata log replaces this with a
+// replayable change log; DeleteTopics has the same gap and also does not fan
+// out yet.
+func (b *Broker) fanOutTopic(name string, partitions []topic.Partition) {
+	if b.Cluster == nil {
+		return
+	}
+	body := encodeApplyTopic(name, partitions)
+	for _, peer := range b.Cluster.All() {
+		if peer.ID == b.NodeID {
+			continue
+		}
+		if _, err := cluster.NewBrokerClient(peer).Send(protocol.RequestHeader{APIKey: internalApplyTopicKey, APIVersion: 0, CorrelationID: 1}, body); err != nil {
+			log.Printf("create topic %s: fan-out to broker %d failed: %v", name, peer.ID, err)
+		}
 	}
 }
 
