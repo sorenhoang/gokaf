@@ -37,6 +37,7 @@ var dispatchTable = map[int16]handlerFunc{
 	20:   (*Broker).handleDeleteTopics,
 	22:   (*Broker).handleInitProducerID,
 	1000: (*Broker).handleApplyTopic, // internalApplyTopicKey
+	1001: (*Broker).handlePing,       // cluster.InternalPingKey
 }
 
 type Broker struct {
@@ -50,6 +51,7 @@ type Broker struct {
 	Producers   *producer.Manager
 	Cluster     *cluster.Membership
 	Replication *replication.Manager
+	IsPeerAlive func(int32) bool
 }
 
 func (b *Broker) Dispatch(conn net.Conn, payload []byte) error {

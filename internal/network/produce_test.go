@@ -106,6 +106,24 @@ func TestHandleProduceRejectsUnknownTopicOrPartition(t *testing.T) {
 	assertProduceResult(t, unknownPartition, "orders", 1, protocol.ErrUnknownTopicOrPartition, -1)
 }
 
+func TestHandleProduceRejectsNonLeaderPartition(t *testing.T) {
+	broker := newProduceTestBroker(t.TempDir())
+	broker.Topics.Upsert(topic.Topic{
+		Name: "orders",
+		Partitions: []topic.Partition{
+			{ID: 0, Leader: 2, Replicas: []int32{1, 2}, ISR: []int32{1, 2}},
+		},
+	})
+
+	body, err := broker.handleProduce(protocol.RequestHeader{APIKey: 0, APIVersion: 0}, produceRequest("orders", 0, buildRecordBatch(t, "hello")))
+	if err != nil {
+		t.Fatalf("handleProduce: unexpected error: %v", err)
+	}
+
+	assertProduceResult(t, body, "orders", 0, protocol.ErrNotLeaderForPartition, -1)
+	assertLogRecordCount(t, broker, "orders", 0, 0)
+}
+
 func TestProduceHandlerIsRegistered(t *testing.T) {
 	if dispatchTable[0] == nil {
 		t.Fatal("Produce handler for api_key 0 is not registered")

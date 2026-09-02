@@ -2,7 +2,6 @@ package network
 
 import (
 	"bytes"
-	"errors"
 
 	"github.com/sorenhoang/gokaf/internal/protocol"
 	"github.com/sorenhoang/gokaf/internal/topic"
@@ -23,20 +22,18 @@ func (b *Broker) handleApplyTopic(header protocol.RequestHeader, body []byte) ([
 		return nil, err
 	}
 
-	code := protocol.ErrNone
-	err = b.Topics.Create(topic.Topic{Name: name, Partitions: partitions})
-	switch {
-	case errors.Is(err, topic.ErrTopicExists):
-		code = protocol.ErrNone
-	case err != nil:
-		code = protocol.ErrUnknown
-	}
-	if code == protocol.ErrNone && b.Replication != nil {
+	// Upsert, not Create: a fan-out for a leader change lands on peers that
+	// already have the topic, and its partition list must be replaced.
+	b.Topics.Upsert(topic.Topic{Name: name, Partitions: partitions})
+	if b.Replication != nil {
+		for _, partition := range partitions {
+			b.Replication.StopFollowing(name, partition.ID)
+		}
 		b.Replication.StartFollowing(topic.Topic{Name: name, Partitions: partitions})
 	}
 
 	e := protocol.NewEncoder()
-	writeTopicResults(e, []topicResult{{name: name, code: code}})
+	writeTopicResults(e, []topicResult{{name: name, code: protocol.ErrNone}})
 	return e.Bytes(), nil
 }
 

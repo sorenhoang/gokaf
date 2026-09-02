@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"io"
@@ -27,6 +28,7 @@ func main() {
 	port := flag.Int("port", 9092, "listen port")
 	peers := flag.String("peers", "", "comma-separated id@host:port for every broker, including this one")
 	replicaFetchInterval := flag.Duration("replica-fetch-interval", 200*time.Millisecond, "interval between follower replica fetches")
+	pingInterval := flag.Duration("ping-interval", 500*time.Millisecond, "interval between peer liveness pings")
 	dataDir := flag.String("data", "./data", "directory for partition log segments")
 	flag.Parse()
 
@@ -49,6 +51,11 @@ func main() {
 	}
 	broker.Replication = replication.NewManager(nodeID, broker.Logs, membership, *replicaFetchInterval)
 	defer broker.Replication.StopAll()
+	monitorContext, cancelMonitor := context.WithCancel(context.Background())
+	defer cancelMonitor()
+	monitor := cluster.NewLivenessMonitor(membership, nodeID, *pingInterval, 3, broker.OnPeerDown, broker.OnPeerUp)
+	broker.IsPeerAlive = monitor.Alive
+	go monitor.Run(monitorContext)
 	offsetLog, err := broker.Logs.Log("__consumer_offsets", 0)
 	if err != nil {
 		log.Fatal(err)

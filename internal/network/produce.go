@@ -86,6 +86,10 @@ func (b *Broker) producePartition(topicName string, partitionIndex int32, batch 
 		response.errorCode = protocol.ErrUnknownTopicOrPartition
 		return response
 	}
+	if t.Partitions[partitionIndex].Leader != b.NodeID {
+		response.errorCode = protocol.ErrNotLeaderForPartition
+		return response
+	}
 	if !validRecordBatch(batch) {
 		response.errorCode = protocol.ErrCorruptMessage
 		return response

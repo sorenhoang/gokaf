@@ -19,7 +19,7 @@ import (
 )
 
 func main() {
-	mode := flag.String("mode", "full", "test mode: full, produce-fetch, fetch-only, multi-partition, metadata-cluster, metadata-leaders, metadata-leaders-check, replica-sync, acks-all, find-coordinator, consumer-group, consumer-group-rebalance, consumer-group-roundrobin, offset-commit-fetch, offset-commit, offset-fetch, idempotent-producer")
+	mode := flag.String("mode", "full", "test mode: full, produce-fetch, fetch-only, multi-partition, metadata-cluster, metadata-leaders, metadata-leaders-check, replica-sync, acks-all, find-coordinator, consumer-group, consumer-group-rebalance, consumer-group-roundrobin, offset-commit-fetch, offset-commit, offset-fetch, idempotent-producer, failover-produce, failover-verify")
 	addr := flag.String("addr", "localhost:9092", "broker address")
 	topicFlag := flag.String("topic", "", "topic name for targeted test modes")
 	n := flag.Int("n", 10, "record count for targeted test modes")
@@ -88,6 +88,10 @@ func main() {
 		checkOffsetFetch(conn, 161, "offset-group", "offset-events", 0, 42)
 	case "idempotent-producer":
 		checkIdempotentProducer(conn)
+	case "failover-produce":
+		checkFailoverProduce(conn, *topicFlag)
+	case "failover-verify":
+		checkFailoverVerify(conn, *topicFlag)
 	default:
 		log.Fatal("unknown mode: " + *mode)
 	}
@@ -1728,6 +1732,53 @@ func checkAcksAll(conn net.Conn, topicName string) {
 	}
 }
 
+func checkFailoverProduce(conn net.Conn, topicName string) {
+	if topicName == "" {
+		log.Fatal("-topic is required for failover-produce")
+	}
+	checkCreateTopicWithReplicationFactor(conn, topicName, 1, 3, 240, 0)
+	for i := 0; i < 5; i++ {
+		batch := buildRecordBatch(fmt.Sprintf("msg-%d", i), -1, -1, -1)
+		offset, errorCode := produceRawBatchWithAcks(conn, topicName, 0, batch, int32(241+i), -1, 10000)
+		if errorCode != protocol.ErrNone || offset != int64(i) {
+			log.Fatal("unexpected pre-failover Produce response")
+		}
+	}
+	log.Printf("failover seed complete: topic=%s records=5", topicName)
+}
+
+func checkFailoverVerify(conn net.Conn, topicName string) {
+	if topicName == "" {
+		log.Fatal("-topic is required for failover-verify")
+	}
+	leaderID, brokers := fetchMetadataPartitionLeader(conn, topicName, 250)
+	if leaderID != 2 {
+		log.Fatal("unexpected failover leader: got " + strconv.Itoa(int(leaderID)) + ", want 2")
+	}
+	leader, ok := findMetadataBroker(brokers, leaderID)
+	if !ok {
+		log.Fatal("failover leader is missing from Metadata broker list")
+	}
+
+	leaderConn, err := net.Dial("tcp", net.JoinHostPort(leader.host, strconv.Itoa(int(leader.port))))
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer leaderConn.Close()
+	for i := 5; i < 10; i++ {
+		batch := buildRecordBatch(fmt.Sprintf("msg-%d", i), -1, -1, -1)
+		offset, errorCode := produceRawBatchWithAcks(leaderConn, topicName, 0, batch, int32(251+i), -1, 10000)
+		if errorCode != protocol.ErrNone || offset != int64(i) {
+			log.Fatal("unexpected post-failover Produce response")
+		}
+	}
+	checkFetchFromPartition(leaderConn, topicName, 0, 0, 270, 10, []string{
+		"msg-0", "msg-1", "msg-2", "msg-3", "msg-4",
+		"msg-5", "msg-6", "msg-7", "msg-8", "msg-9",
+	})
+	log.Printf("failover verified: topic=%s leader=%d records=10", topicName, leaderID)
+}
+
 func waitForReplicaFetch(addr string, topicName string, wantHighWatermark int64, wantValues []string) {
 	deadline := time.Now().Add(5 * time.Second)
 	var lastHighWatermark int64
@@ -1964,6 +2015,77 @@ func fetchMetadataLeaderCounts(conn net.Conn, topicName string, correlationID in
 	}
 	log.Fatal("Metadata response did not include expected topic " + topicName)
 	return nil
+}
+
+func fetchMetadataPartitionLeader(conn net.Conn, topicName string, correlationID int32) (int32, []metadataBroker) {
+	header := protocol.RequestHeader{APIKey: 3, APIVersion: 0, CorrelationID: correlationID}
+	e := protocol.NewEncoder()
+	protocol.WriteRequestHeader(e, header)
+	e.WriteArrayLen(0)
+	if err := network.WriteFrame(conn, e.Bytes()); err != nil {
+		log.Fatal(err)
+	}
+	respPayload, err := network.ReadFrame(conn)
+	if err != nil {
+		log.Fatal(err)
+	}
+	dec := protocol.NewDecoder(bytes.NewReader(respPayload))
+	respHeader, err := protocol.ReadResponseHeader(dec)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if respHeader.CorrelationID != correlationID {
+		log.Fatal("unexpected Metadata correlation_id=" + strconv.Itoa(int(respHeader.CorrelationID)))
+	}
+	brokers := readMetadataBrokers(dec)
+	topicCount, err := dec.ReadArrayLen()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read topic count: %w", err))
+	}
+	for i := 0; i < topicCount; i++ {
+		errorCode := mustReadInt16(dec, "topic error_code")
+		name, err := dec.ReadString()
+		if err != nil {
+			log.Fatal(fmt.Errorf("read topic name: %w", err))
+		}
+		partitionCount := mustReadArrayLen(dec, "partition count")
+		for j := 0; j < partitionCount; j++ {
+			partitionErrorCode := mustReadInt16(dec, "partition error_code")
+			partitionID := mustReadInt32(dec, "partition index")
+			leaderID := mustReadInt32(dec, "partition leader_id")
+			drainMetadataIDs(dec, "replica")
+			drainMetadataIDs(dec, "isr")
+			if errorCode == 0 && partitionErrorCode == 0 && name == topicName && partitionID == 0 {
+				return leaderID, brokers
+			}
+		}
+	}
+	log.Fatal("Metadata response did not include expected topic " + topicName)
+	return 0, nil
+}
+
+func findMetadataBroker(brokers []metadataBroker, id int32) (metadataBroker, bool) {
+	for _, broker := range brokers {
+		if broker.id == id {
+			return broker, true
+		}
+	}
+	return metadataBroker{}, false
+}
+
+func mustReadArrayLen(dec *protocol.Decoder, field string) int {
+	value, err := dec.ReadArrayLen()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read %s: %w", field, err))
+	}
+	return value
+}
+
+func drainMetadataIDs(dec *protocol.Decoder, field string) {
+	count := mustReadArrayLen(dec, field+" count")
+	for i := 0; i < count; i++ {
+		mustReadInt32(dec, field+" node_id")
+	}
 }
 
 func equalLeaderCounts(a map[int32]int, b map[int32]int) bool {

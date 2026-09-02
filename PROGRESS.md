@@ -83,7 +83,7 @@ not "done." Update this file as phases complete; keep `CLAUDE.md`'s
       AC: Simulate a slow follower (delay its fetch loop) →
       Produce(acks=all) blocks/waits correctly, while Produce(acks=1)
       returns immediately without waiting.
-- [ ] **Phase 21** — Simple leader failover
+- [x] **Phase 21** — Simple leader failover
       AC: Kill the leader process mid-Produce → the producer (following the
       NotLeaderForPartition error) switches to the new leader without
       losing any data that was already in the ISR at crash time.

@@ -2,6 +2,7 @@ package topic
 
 import (
 	"errors"
+	"slices"
 	"testing"
 )
 
@@ -14,6 +15,31 @@ func TestRegistryCreateRejectsDuplicateTopic(t *testing.T) {
 	err := registry.Create(Topic{Name: "orders"})
 	if !errors.Is(err, ErrTopicExists) {
 		t.Fatalf("Create duplicate: got %v, want ErrTopicExists", err)
+	}
+}
+
+func TestRegistryUpsertReplacesExistingTopic(t *testing.T) {
+	registry := NewRegistry()
+	registry.Add(Topic{
+		Name: "orders",
+		Partitions: []Partition{
+			{ID: 0, Leader: 1, Replicas: []int32{1, 2, 3}, ISR: []int32{1, 2, 3}},
+		},
+	})
+
+	registry.Upsert(Topic{
+		Name: "orders",
+		Partitions: []Partition{
+			{ID: 0, Leader: 2, Replicas: []int32{1, 2, 3}, ISR: []int32{2, 3}},
+		},
+	})
+
+	got, ok := registry.Get("orders")
+	if !ok {
+		t.Fatal("topic missing after upsert")
+	}
+	if got.Partitions[0].Leader != 2 || !slices.Equal(got.Partitions[0].ISR, []int32{2, 3}) {
+		t.Fatalf("upserted partition = %+v, want leader 2 and ISR [2 3]", got.Partitions[0])
 	}
 }
 

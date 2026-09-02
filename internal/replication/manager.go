@@ -45,6 +45,7 @@ func (m *Manager) StartFollowing(t topic.Topic) {
 		}
 		key := tp{topic: t.Name, partition: partition.ID}
 		if partition.Replicas[0] == m.selfID {
+			m.stopFollowingKey(key)
 			m.mu.Lock()
 			if _, ok := m.led[key]; !ok {
 				m.led[key] = NewPartitionState(partition.Replicas, m.selfID, m.lagTimeout)
@@ -66,6 +67,7 @@ func (m *Manager) StartFollowing(t topic.Topic) {
 			m.mu.Unlock()
 			continue
 		}
+		delete(m.led, key)
 		ctx, cancel := context.WithCancel(context.Background())
 		m.fetchers[key] = cancel
 		m.mu.Unlock()
@@ -80,6 +82,21 @@ func (m *Manager) StartFollowing(t topic.Topic) {
 			maxBytes:  1 << 20,
 		}
 		go f.run(ctx)
+	}
+}
+
+func (m *Manager) StopFollowing(topic string, partition int32) {
+	m.stopFollowingKey(tp{topic: topic, partition: partition})
+}
+
+func (m *Manager) Lead(topic string, partition int32, isr []int32) {
+	key := tp{topic: topic, partition: partition}
+	m.stopFollowingKey(key)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if _, ok := m.led[key]; !ok {
+		m.led[key] = NewPartitionState(isr, m.selfID, m.lagTimeout)
 	}
 }
 
@@ -122,6 +139,18 @@ func (m *Manager) partitionState(topic string, partition int32) *PartitionState 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.led[tp{topic: topic, partition: partition}]
+}
+
+func (m *Manager) stopFollowingKey(key tp) {
+	m.mu.Lock()
+	cancel, ok := m.fetchers[key]
+	if ok {
+		delete(m.fetchers, key)
+	}
+	m.mu.Unlock()
+	if ok {
+		cancel()
+	}
 }
 
 func (m *Manager) StopAll() {

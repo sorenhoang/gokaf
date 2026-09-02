@@ -74,6 +74,13 @@ func (r *Registry) Add(t Topic) {
 	r.topics[t.Name] = cloneTopic(t)
 }
 
+func (r *Registry) Upsert(t Topic) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.topics[t.Name] = cloneTopic(t)
+}
+
 func (r *Registry) Create(t Topic) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

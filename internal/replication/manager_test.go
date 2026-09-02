@@ -7,7 +7,9 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
+	"time"
 
 	"github.com/sorenhoang/gokaf/internal/cluster"
 	"github.com/sorenhoang/gokaf/internal/protocol"
@@ -93,6 +95,35 @@ func TestBuildFetchRequestUsesReplicaID(t *testing.T) {
 	}
 	if replicaID != 2 {
 		t.Fatalf("replica_id = %d, want 2", replicaID)
+	}
+}
+
+func TestManagerStopFollowingRemovesFetcher(t *testing.T) {
+	membership, err := cluster.ParseMembership("1@localhost:19092,2@localhost:19093", 2, "localhost", 19093)
+	if err != nil {
+		t.Fatalf("ParseMembership: %v", err)
+	}
+	manager := NewManager(2, storage.NewManager(t.TempDir()), membership, time.Second)
+	manager.fetchers[tp{topic: "orders", partition: 0}] = func() {}
+
+	manager.StopFollowing("orders", 0)
+
+	if _, ok := manager.fetchers[tp{topic: "orders", partition: 0}]; ok {
+		t.Fatal("fetcher still registered after StopFollowing")
+	}
+}
+
+func TestManagerLeadCreatesPartitionState(t *testing.T) {
+	membership, err := cluster.ParseMembership("1@localhost:19092,2@localhost:19093,3@localhost:19094", 2, "localhost", 19093)
+	if err != nil {
+		t.Fatalf("ParseMembership: %v", err)
+	}
+	manager := NewManager(2, storage.NewManager(t.TempDir()), membership, time.Second)
+
+	manager.Lead("orders", 0, []int32{2, 3})
+
+	if got := manager.ISR("orders", 0); !reflect.DeepEqual(got, []int32{2, 3}) {
+		t.Fatalf("ISR = %v, want [2 3]", got)
 	}
 }
 

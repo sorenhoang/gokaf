@@ -118,7 +118,7 @@ func (b *Broker) fanOutTopic(name string, partitions []topic.Partition) {
 	}
 	body := encodeApplyTopic(name, partitions)
 	for _, peer := range b.Cluster.All() {
-		if peer.ID == b.NodeID {
+		if peer.ID == b.NodeID || !b.peerAlive(peer.ID) {
 			continue
 		}
 		if _, err := cluster.NewBrokerClient(peer).Send(protocol.RequestHeader{APIKey: internalApplyTopicKey, APIVersion: 0, CorrelationID: 1}, body); err != nil {

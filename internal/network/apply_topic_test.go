@@ -42,6 +42,29 @@ func TestHandleApplyTopicTreatsDuplicateAsSuccess(t *testing.T) {
 	assertTopicResult(t, body, "orders", protocol.ErrNone)
 }
 
+func TestHandleApplyTopicUpsertsExistingTopic(t *testing.T) {
+	broker := &Broker{Topics: topic.NewRegistry()}
+	broker.Topics.Add(topic.Topic{
+		Name:       "orders",
+		Partitions: []topic.Partition{{ID: 0, Leader: 1, Replicas: []int32{1, 2, 3}, ISR: []int32{1, 2, 3}}},
+	})
+	partitions := []topic.Partition{{ID: 0, Leader: 2, Replicas: []int32{1, 2, 3}, ISR: []int32{2, 3}}}
+
+	body, err := broker.handleApplyTopic(protocol.RequestHeader{APIKey: 1000}, encodeApplyTopic("orders", partitions))
+	if err != nil {
+		t.Fatalf("handleApplyTopic returned error: %v", err)
+	}
+	assertTopicResult(t, body, "orders", protocol.ErrNone)
+
+	got, ok := broker.Topics.Get("orders")
+	if !ok {
+		t.Fatal("topic missing after apply")
+	}
+	if !samePartitions(got.Partitions, partitions) {
+		t.Fatalf("partitions = %#v, want %#v", got.Partitions, partitions)
+	}
+}
+
 func TestApplyTopicHandlerIsRegistered(t *testing.T) {
 	if dispatchTable[1000] == nil {
 		t.Fatal("ApplyTopic handler is not registered for internal API key 1000")

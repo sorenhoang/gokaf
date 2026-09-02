@@ -6,6 +6,7 @@ const (
 	ErrOffsetOutOfRange         int16 = 1
 	ErrCorruptMessage           int16 = 2
 	ErrUnknownTopicOrPartition  int16 = 3
+	ErrNotLeaderForPartition    int16 = 6
 	ErrRequestTimedOut          int16 = 7
 	ErrTopicAlreadyExists       int16 = 36
 	ErrInvalidPartitions        int16 = 37

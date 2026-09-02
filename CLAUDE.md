@@ -44,7 +44,7 @@ delegating it to Claude. Behave accordingly:
 
 ## Current status
 
-Phases 0–20 done. Next up: **Phase 21 — Simple leader failover** (Track D).
+Phases 0–21 done. Next up: **Phase 22 — Controller election** (Track E).
 
 Full checklist with acceptance criteria per phase: [PROGRESS.md](PROGRESS.md).
 Update both this line and the matching checkbox in PROGRESS.md as phases
