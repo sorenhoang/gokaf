@@ -9,15 +9,17 @@ import (
 	"io"
 	"log"
 	"net"
+	"sort"
 	"strconv"
 	"time"
 
+	"github.com/sorenhoang/gokaf/internal/assignor"
 	"github.com/sorenhoang/gokaf/internal/network"
 	"github.com/sorenhoang/gokaf/internal/protocol"
 )
 
 func main() {
-	mode := flag.String("mode", "full", "test mode: full, produce-fetch, fetch-only, multi-partition, find-coordinator, consumer-group, consumer-group-rebalance, offset-commit-fetch, offset-commit, offset-fetch")
+	mode := flag.String("mode", "full", "test mode: full, produce-fetch, fetch-only, multi-partition, find-coordinator, consumer-group, consumer-group-rebalance, consumer-group-roundrobin, offset-commit-fetch, offset-commit, offset-fetch")
 	flag.Parse()
 
 	conn, err := net.Dial("tcp", "localhost:9092")
@@ -59,6 +61,8 @@ func main() {
 		checkConsumerGroup(conn)
 	case "consumer-group-rebalance":
 		checkConsumerGroupRebalance(conn)
+	case "consumer-group-roundrobin":
+		checkConsumerGroupRoundRobin(conn)
 	case "offset-commit-fetch":
 		checkOffsetCommit(conn, 160, "offset-group", "offset-events", 0, 42)
 		checkOffsetFetch(conn, 161, "offset-group", "offset-events", 0, 42)
@@ -420,7 +424,7 @@ func checkConsumerGroup(conn net.Conn) {
 		log.Fatal("unexpected JoinGroup members array sizes")
 	}
 
-	assignments := buildPlaceholderAssignments(leader.members, topicName, 3)
+	assignments := buildAssignments(leader.members, leader.protocolName, map[string]int32{topicName: 3})
 	followerSyncCh := syncGroupAsync(followerSyncConn, groupID, follower.generationID, follower.memberID, nil, 123)
 	leaderSyncCh := syncGroupAsync(leaderConn, groupID, leader.generationID, leader.memberID, assignments, 124)
 
@@ -430,6 +434,55 @@ func checkConsumerGroup(conn net.Conn) {
 		leaderSync.memberID:   leaderSync.assignment,
 		followerSync.memberID: followerSync.assignment,
 	}, topicName, 3)
+}
+
+func checkConsumerGroupRoundRobin(conn net.Conn) {
+	suffix := strconv.FormatInt(time.Now().UnixNano(), 10)
+	groupID := "roundrobin-consumers-" + suffix
+	topicName := "roundrobin-events-" + suffix
+	checkCreateTopic(conn, topicName, 3, 125, 0)
+
+	followerConn, err := net.Dial("tcp", "localhost:9092")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer followerConn.Close()
+
+	firstCh := joinGroupAsyncWithProtocols(conn, groupID, "client-a", "", 30000, 126, []string{topicName}, []string{"roundrobin"})
+	secondCh := joinGroupAsyncWithProtocols(followerConn, groupID, "client-b", "", 30000, 127, []string{topicName}, []string{"roundrobin"})
+	first := receiveJoinGroup(firstCh)
+	second := receiveJoinGroup(secondCh)
+
+	leader, follower := first, second
+	leaderConn, followerSyncConn := conn, followerConn
+	if second.memberID == second.leaderID {
+		leader, follower = second, first
+		leaderConn, followerSyncConn = followerConn, conn
+	}
+	if leader.protocolName != "roundrobin" || follower.protocolName != "roundrobin" {
+		log.Fatal("unexpected JoinGroup protocol for roundrobin mode")
+	}
+
+	assignments := buildAssignments(leader.members, leader.protocolName, map[string]int32{topicName: 3})
+	followerSyncCh := syncGroupAsync(followerSyncConn, groupID, follower.generationID, follower.memberID, nil, 128)
+	leaderSyncCh := syncGroupAsync(leaderConn, groupID, leader.generationID, leader.memberID, assignments, 129)
+	leaderSync := receiveSyncGroup(leaderSyncCh)
+	followerSync := receiveSyncGroup(followerSyncCh)
+
+	got := map[string][]int32{
+		leaderSync.memberID:   partitionsForAssignment(leaderSync.assignment, topicName),
+		followerSync.memberID: partitionsForAssignment(followerSync.assignment, topicName),
+	}
+	memberIDs := []string{first.memberID, second.memberID}
+	sort.Strings(memberIDs)
+	want := map[string][]int32{
+		memberIDs[0]: {0, 2},
+		memberIDs[1]: {1},
+	}
+	if !equalPartitionMap(got, want) {
+		log.Fatal("unexpected roundrobin assignment")
+	}
+	log.Printf("roundrobin assignment exact: %v", got)
 }
 
 func checkConsumerGroupRebalance(conn net.Conn) {
@@ -455,7 +508,7 @@ func checkConsumerGroupRebalance(conn net.Conn) {
 		leader, follower = second, first
 		leaderConn, followerSyncConn = deadConn, conn
 	}
-	assignments := buildPlaceholderAssignments(leader.members, topicName, 3)
+	assignments := buildAssignments(leader.members, leader.protocolName, map[string]int32{topicName: 3})
 	followerSyncCh := syncGroupAsync(followerSyncConn, groupID, follower.generationID, follower.memberID, nil, 133)
 	leaderSyncCh := syncGroupAsync(leaderConn, groupID, leader.generationID, leader.memberID, assignments, 134)
 	leaderSync := receiveSyncGroup(leaderSyncCh)
@@ -491,9 +544,7 @@ func checkConsumerGroupRebalance(conn net.Conn) {
 	if rejoined.generationID != 2 || rejoined.memberID != survivor.memberID || rejoined.leaderID != survivor.memberID || len(rejoined.members) != 1 {
 		log.Fatal("unexpected rejoin response after rebalance")
 	}
-	rejoinAssignments := map[string][]byte{
-		rejoined.memberID: encodeAssignment([]topicAssignment{{topic: topicName, partitions: []int32{0, 1, 2}}}),
-	}
+	rejoinAssignments := buildAssignments(rejoined.members, rejoined.protocolName, map[string]int32{topicName: 3})
 	rejoinedSync := checkSyncGroup(conn, groupID, rejoined.generationID, rejoined.memberID, rejoinAssignments, 152)
 	assertConsumerGroupAssignments(map[string][]byte{rejoinedSync.memberID: rejoinedSync.assignment}, topicName, 3)
 	if code := checkLeaveGroup(conn, groupID, rejoined.memberID, 153); code != 0 {
@@ -577,14 +628,22 @@ func joinGroupAsync(conn net.Conn, groupID string, clientID string, correlationI
 }
 
 func joinGroupAsyncWithMember(conn net.Conn, groupID string, clientID string, memberID string, sessionTimeoutMS int32, correlationID int32, topics []string) <-chan joinGroupResult {
+	return joinGroupAsyncWithProtocols(conn, groupID, clientID, memberID, sessionTimeoutMS, correlationID, topics, []string{"range", "roundrobin"})
+}
+
+func joinGroupAsyncWithProtocols(conn net.Conn, groupID string, clientID string, memberID string, sessionTimeoutMS int32, correlationID int32, topics []string, protocols []string) <-chan joinGroupResult {
 	ch := make(chan joinGroupResult, 1)
 	go func() {
-		ch <- checkJoinGroup(conn, groupID, clientID, memberID, sessionTimeoutMS, correlationID, topics)
+		ch <- checkJoinGroupWithProtocols(conn, groupID, clientID, memberID, sessionTimeoutMS, correlationID, topics, protocols)
 	}()
 	return ch
 }
 
 func checkJoinGroup(conn net.Conn, groupID string, clientID string, memberID string, sessionTimeoutMS int32, correlationID int32, topics []string) joinGroupResult {
+	return checkJoinGroupWithProtocols(conn, groupID, clientID, memberID, sessionTimeoutMS, correlationID, topics, []string{"range", "roundrobin"})
+}
+
+func checkJoinGroupWithProtocols(conn net.Conn, groupID string, clientID string, memberID string, sessionTimeoutMS int32, correlationID int32, topics []string, protocols []string) joinGroupResult {
 	headerClientID := clientID
 	header := protocol.RequestHeader{
 		APIKey:        11,
@@ -599,9 +658,11 @@ func checkJoinGroup(conn net.Conn, groupID string, clientID string, memberID str
 	e.WriteInt32(sessionTimeoutMS)
 	e.WriteString(memberID)
 	e.WriteString("consumer")
-	e.WriteArrayLen(1)
-	e.WriteString("range")
-	e.WriteBytes(encodeSubscription(topics))
+	e.WriteArrayLen(len(protocols))
+	for _, protocolName := range protocols {
+		e.WriteString(protocolName)
+		e.WriteBytes(encodeSubscription(topics))
+	}
 	if err := network.WriteFrame(conn, e.Bytes()); err != nil {
 		log.Fatal(err)
 	}
@@ -758,6 +819,29 @@ func encodeSubscription(topics []string) []byte {
 	return e.Bytes()
 }
 
+func decodeSubscription(b []byte) []string {
+	dec := protocol.NewDecoder(bytes.NewReader(b))
+	if _, err := dec.ReadInt16(); err != nil {
+		log.Fatal(fmt.Errorf("read subscription version: %w", err))
+	}
+	topicCount, err := dec.ReadArrayLen()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read subscription topic count: %w", err))
+	}
+	topics := make([]string, 0, topicCount)
+	for i := 0; i < topicCount; i++ {
+		topic, err := dec.ReadString()
+		if err != nil {
+			log.Fatal(fmt.Errorf("read subscription topic: %w", err))
+		}
+		topics = append(topics, topic)
+	}
+	if _, err := dec.ReadBytes(); err != nil {
+		log.Fatal(fmt.Errorf("read subscription user_data: %w", err))
+	}
+	return topics
+}
+
 func encodeAssignment(assignments []topicAssignment) []byte {
 	e := protocol.NewEncoder()
 	e.WriteInt16(0)
@@ -808,18 +892,35 @@ func decodeAssignment(b []byte) []topicAssignment {
 	return assignments
 }
 
-func buildPlaceholderAssignments(members []joinGroupMember, topicName string, partitionCount int32) map[string][]byte {
+func buildAssignments(members []joinGroupMember, protocolName string, partitionCounts map[string]int32) map[string][]byte {
+	subs := make([]assignor.Subscription, 0, len(members))
+	for _, member := range members {
+		subs = append(subs, assignor.Subscription{MemberID: member.id, Topics: decodeSubscription(member.metadata)})
+	}
+
+	var assigned map[string][]assignor.TopicPartitions
+	switch protocolName {
+	case "range":
+		assigned = assignor.Range(subs, partitionCounts)
+	case "roundrobin":
+		assigned = assignor.RoundRobin(subs, partitionCounts)
+	default:
+		log.Fatal("unsupported assignment protocol: " + protocolName)
+	}
+
 	assignments := make(map[string][]byte, len(members))
 	for _, member := range members {
-		assignments[member.id] = encodeAssignment([]topicAssignment{{topic: topicName}})
-	}
-	for partition := int32(0); partition < partitionCount; partition++ {
-		member := members[int(partition)%len(members)]
-		current := decodeAssignment(assignments[member.id])
-		current[0].partitions = append(current[0].partitions, partition)
-		assignments[member.id] = encodeAssignment(current)
+		assignments[member.id] = encodeAssignment(toTopicAssignments(assigned[member.id]))
 	}
 	return assignments
+}
+
+func toTopicAssignments(assignments []assignor.TopicPartitions) []topicAssignment {
+	converted := make([]topicAssignment, 0, len(assignments))
+	for _, assignment := range assignments {
+		converted = append(converted, topicAssignment{topic: assignment.Topic, partitions: assignment.Partitions})
+	}
+	return converted
 }
 
 func assertConsumerGroupAssignments(assignments map[string][]byte, topicName string, partitionCount int32) {
@@ -844,6 +945,34 @@ func assertConsumerGroupAssignments(assignments map[string][]byte, topicName str
 		}
 	}
 	log.Printf("consumer group assignment complete: topic=%s partitions=%v", topicName, seen)
+}
+
+func partitionsForAssignment(assignmentBytes []byte, topicName string) []int32 {
+	var partitions []int32
+	for _, assignment := range decodeAssignment(assignmentBytes) {
+		if assignment.topic == topicName {
+			partitions = append(partitions, assignment.partitions...)
+		}
+	}
+	return partitions
+}
+
+func equalPartitionMap(a map[string][]int32, b map[string][]int32) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for memberID, aPartitions := range a {
+		bPartitions, ok := b[memberID]
+		if !ok || len(aPartitions) != len(bPartitions) {
+			return false
+		}
+		for i := range aPartitions {
+			if aPartitions[i] != bPartitions[i] {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func readAPIVersionEntry(dec *protocol.Decoder) (int16, int16, int16) {

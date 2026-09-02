@@ -58,7 +58,7 @@ not "done." Update this file as phases complete; keep `CLAUDE.md`'s
 - [x] **Phase 14** — OffsetCommit / OffsetFetch (key=8/9) + internal offsets log
       AC: Commit an offset, fully restart the broker (kill + start),
       OffsetFetch still returns the committed offset.
-- [ ] **Phase 15** — Real Range / RoundRobin assignors
+- [x] **Phase 15** — Real Range / RoundRobin assignors
       AC: Pure unit test of the assignor (no network): given N partitions
       and M members, output matches the worked examples in the Kafka docs.
 

@@ -426,10 +426,10 @@ func cloneBytes(b []byte) []byte {
 
 // groupProtocol picks the assignment protocol for the rebalance.
 //
-// ponytail: just takes the first member's first protocol. Real Kafka
+// ponytail: takes the first-joined member's first protocol. Real Kafka
 // intersects every member's supported-protocol list and fails the join with
-// INCONSISTENT_GROUP_PROTOCOL when there's no common choice. Fine while every
-// consumer sends "range"; Phase 15 does the real selection.
+// INCONSISTENT_GROUP_PROTOCOL when there's no common choice. Works here because
+// the test client sends the same protocol list on every member.
 func groupProtocol(group *Group) string {
 	if len(group.JoinOrder) == 0 {
 		return ""

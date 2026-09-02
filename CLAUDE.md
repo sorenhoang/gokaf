@@ -44,7 +44,7 @@ delegating it to Claude. Behave accordingly:
 
 ## Current status
 
-Phases 0–14 done. Next up: **Phase 15 — Real Range / RoundRobin assignors** (Track B).
+Phases 0–15 done. Track B complete. Next up: **Phase 16 — InitProducerId + idempotent producer** (Track C).
 
 Full checklist with acceptance criteria per phase: [PROGRESS.md](PROGRESS.md).
 Update both this line and the matching checkbox in PROGRESS.md as phases
