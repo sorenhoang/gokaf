@@ -55,7 +55,7 @@ not "done." Update this file as phases complete; keep `CLAUDE.md`'s
       AC: Simulate one member crashing (stop sending heartbeats) → after
       the timeout, the coordinator rebalances and the remaining members
       pick up its partitions.
-- [ ] **Phase 14** — OffsetCommit / OffsetFetch (key=8/9) + internal offsets log
+- [x] **Phase 14** — OffsetCommit / OffsetFetch (key=8/9) + internal offsets log
       AC: Commit an offset, fully restart the broker (kill + start),
       OffsetFetch still returns the committed offset.
 - [ ] **Phase 15** — Real Range / RoundRobin assignors

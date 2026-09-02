@@ -17,7 +17,7 @@ import (
 )
 
 func main() {
-	mode := flag.String("mode", "full", "test mode: full, produce-fetch, fetch-only, multi-partition, find-coordinator, consumer-group, consumer-group-rebalance")
+	mode := flag.String("mode", "full", "test mode: full, produce-fetch, fetch-only, multi-partition, find-coordinator, consumer-group, consumer-group-rebalance, offset-commit-fetch, offset-commit, offset-fetch")
 	flag.Parse()
 
 	conn, err := net.Dial("tcp", "localhost:9092")
@@ -59,6 +59,13 @@ func main() {
 		checkConsumerGroup(conn)
 	case "consumer-group-rebalance":
 		checkConsumerGroupRebalance(conn)
+	case "offset-commit-fetch":
+		checkOffsetCommit(conn, 160, "offset-group", "offset-events", 0, 42)
+		checkOffsetFetch(conn, 161, "offset-group", "offset-events", 0, 42)
+	case "offset-commit":
+		checkOffsetCommit(conn, 160, "offset-group", "offset-events", 0, 42)
+	case "offset-fetch":
+		checkOffsetFetch(conn, 161, "offset-group", "offset-events", 0, 42)
 	default:
 		log.Fatal("unknown mode: " + *mode)
 	}
@@ -133,6 +140,8 @@ func checkApiVersions(conn net.Conn) {
 	}
 
 	foundListOffsets := false
+	foundOffsetCommit := false
+	foundOffsetFetch := false
 	foundApiVersions := false
 	foundFindCoordinator := false
 	foundJoinGroup := false
@@ -144,6 +153,12 @@ func checkApiVersions(conn net.Conn) {
 		log.Printf("api_versions entry: api_key=%d min_version=%d max_version=%d", apiKey, minVersion, maxVersion)
 		if apiKey == 2 && minVersion == 1 && maxVersion == 1 {
 			foundListOffsets = true
+		}
+		if apiKey == 8 && minVersion == 0 && maxVersion == 0 {
+			foundOffsetCommit = true
+		}
+		if apiKey == 9 && minVersion == 0 && maxVersion == 0 {
+			foundOffsetFetch = true
 		}
 		if apiKey == 10 && minVersion == 0 && maxVersion == 0 {
 			foundFindCoordinator = true
@@ -166,8 +181,8 @@ func checkApiVersions(conn net.Conn) {
 	}
 
 	log.Printf("api_versions response: correlation_id=%d error_code=%d api_count=%d", respHeader.CorrelationID, errorCode, apiCount)
-	if respHeader.CorrelationID != 43 || errorCode != 0 || !foundApiVersions || !foundListOffsets || !foundFindCoordinator || !foundJoinGroup || !foundHeartbeat || !foundLeaveGroup || !foundSyncGroup {
-		log.Fatal("unexpected ApiVersions response: correlation_id=" + strconv.Itoa(int(respHeader.CorrelationID)) + " error_code=" + strconv.Itoa(int(errorCode)) + " found_api_versions=" + strconv.FormatBool(foundApiVersions) + " found_list_offsets=" + strconv.FormatBool(foundListOffsets) + " found_find_coordinator=" + strconv.FormatBool(foundFindCoordinator) + " found_join_group=" + strconv.FormatBool(foundJoinGroup) + " found_heartbeat=" + strconv.FormatBool(foundHeartbeat) + " found_leave_group=" + strconv.FormatBool(foundLeaveGroup) + " found_sync_group=" + strconv.FormatBool(foundSyncGroup))
+	if respHeader.CorrelationID != 43 || errorCode != 0 || !foundApiVersions || !foundListOffsets || !foundOffsetCommit || !foundOffsetFetch || !foundFindCoordinator || !foundJoinGroup || !foundHeartbeat || !foundLeaveGroup || !foundSyncGroup {
+		log.Fatal("unexpected ApiVersions response: correlation_id=" + strconv.Itoa(int(respHeader.CorrelationID)) + " error_code=" + strconv.Itoa(int(errorCode)) + " found_api_versions=" + strconv.FormatBool(foundApiVersions) + " found_list_offsets=" + strconv.FormatBool(foundListOffsets) + " found_offset_commit=" + strconv.FormatBool(foundOffsetCommit) + " found_offset_fetch=" + strconv.FormatBool(foundOffsetFetch) + " found_find_coordinator=" + strconv.FormatBool(foundFindCoordinator) + " found_join_group=" + strconv.FormatBool(foundJoinGroup) + " found_heartbeat=" + strconv.FormatBool(foundHeartbeat) + " found_leave_group=" + strconv.FormatBool(foundLeaveGroup) + " found_sync_group=" + strconv.FormatBool(foundSyncGroup))
 	}
 }
 
@@ -216,6 +231,136 @@ func checkFindCoordinator(conn net.Conn, groupID string, correlationID int32) {
 	log.Printf("find_coordinator response: group_id=%s correlation_id=%d error_code=%d node_id=%d host=%s port=%d", groupID, respHeader.CorrelationID, errorCode, nodeID, host, port)
 	if respHeader.CorrelationID != correlationID || errorCode != 0 || nodeID != 1 || host != "localhost" || port != 9092 {
 		log.Fatal("unexpected FindCoordinator response")
+	}
+}
+
+func checkOffsetCommit(conn net.Conn, correlationID int32, groupID string, topic string, partition int32, offset int64) {
+	header := protocol.RequestHeader{
+		APIKey:        8,
+		APIVersion:    0,
+		CorrelationID: correlationID,
+		ClientID:      nil,
+	}
+
+	e := protocol.NewEncoder()
+	protocol.WriteRequestHeader(e, header)
+	e.WriteString(groupID)
+	e.WriteArrayLen(1)
+	e.WriteString(topic)
+	e.WriteArrayLen(1)
+	e.WriteInt32(partition)
+	e.WriteInt64(offset)
+	e.WriteNullableString(nil)
+	if err := network.WriteFrame(conn, e.Bytes()); err != nil {
+		log.Fatal(err)
+	}
+
+	respPayload, err := network.ReadFrame(conn)
+	if err != nil {
+		log.Fatal(err)
+	}
+	dec := protocol.NewDecoder(bytes.NewReader(respPayload))
+	respHeader, err := protocol.ReadResponseHeader(dec)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if respHeader.CorrelationID != correlationID {
+		log.Fatal("unexpected OffsetCommit correlation_id=" + strconv.Itoa(int(respHeader.CorrelationID)))
+	}
+	topicCount, err := dec.ReadArrayLen()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read offset_commit topic count: %w", err))
+	}
+	if topicCount != 1 {
+		log.Fatal("unexpected OffsetCommit topic count=" + strconv.Itoa(topicCount))
+	}
+	topicName, err := dec.ReadString()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read offset_commit topic name: %w", err))
+	}
+	partitionCount, err := dec.ReadArrayLen()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read offset_commit partition count: %w", err))
+	}
+	gotPartition, err := dec.ReadInt32()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read offset_commit partition: %w", err))
+	}
+	errorCode, err := dec.ReadInt16()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read offset_commit error_code: %w", err))
+	}
+	log.Printf("offset_commit response: group=%s topic=%s partition=%d error_code=%d", groupID, topicName, gotPartition, errorCode)
+	if topicName != topic || partitionCount != 1 || gotPartition != partition || errorCode != 0 {
+		log.Fatal("unexpected OffsetCommit response")
+	}
+}
+
+func checkOffsetFetch(conn net.Conn, correlationID int32, groupID string, topic string, partition int32, wantOffset int64) {
+	header := protocol.RequestHeader{
+		APIKey:        9,
+		APIVersion:    0,
+		CorrelationID: correlationID,
+		ClientID:      nil,
+	}
+
+	e := protocol.NewEncoder()
+	protocol.WriteRequestHeader(e, header)
+	e.WriteString(groupID)
+	e.WriteArrayLen(1)
+	e.WriteString(topic)
+	e.WriteArrayLen(1)
+	e.WriteInt32(partition)
+	if err := network.WriteFrame(conn, e.Bytes()); err != nil {
+		log.Fatal(err)
+	}
+
+	respPayload, err := network.ReadFrame(conn)
+	if err != nil {
+		log.Fatal(err)
+	}
+	dec := protocol.NewDecoder(bytes.NewReader(respPayload))
+	respHeader, err := protocol.ReadResponseHeader(dec)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if respHeader.CorrelationID != correlationID {
+		log.Fatal("unexpected OffsetFetch correlation_id=" + strconv.Itoa(int(respHeader.CorrelationID)))
+	}
+	topicCount, err := dec.ReadArrayLen()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read offset_fetch topic count: %w", err))
+	}
+	if topicCount != 1 {
+		log.Fatal("unexpected OffsetFetch topic count=" + strconv.Itoa(topicCount))
+	}
+	topicName, err := dec.ReadString()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read offset_fetch topic name: %w", err))
+	}
+	partitionCount, err := dec.ReadArrayLen()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read offset_fetch partition count: %w", err))
+	}
+	gotPartition, err := dec.ReadInt32()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read offset_fetch partition: %w", err))
+	}
+	committedOffset, err := dec.ReadInt64()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read offset_fetch committed_offset: %w", err))
+	}
+	metadata, err := dec.ReadNullableString()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read offset_fetch metadata: %w", err))
+	}
+	errorCode, err := dec.ReadInt16()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read offset_fetch error_code: %w", err))
+	}
+	log.Printf("offset_fetch response: group=%s topic=%s partition=%d committed_offset=%d metadata=%v error_code=%d", groupID, topicName, gotPartition, committedOffset, metadata, errorCode)
+	if topicName != topic || partitionCount != 1 || gotPartition != partition || committedOffset != wantOffset || metadata != nil || errorCode != 0 {
+		log.Fatal("unexpected OffsetFetch response")
 	}
 }
 

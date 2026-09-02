@@ -14,6 +14,7 @@ import (
 
 	"github.com/sorenhoang/gokaf/internal/group"
 	"github.com/sorenhoang/gokaf/internal/network"
+	"github.com/sorenhoang/gokaf/internal/offset"
 	"github.com/sorenhoang/gokaf/internal/storage"
 	"github.com/sorenhoang/gokaf/internal/topic"
 )
@@ -29,6 +30,14 @@ func main() {
 		Topics: topic.NewRegistry(),
 		Logs:   storage.NewManager(*dataDir),
 		Groups: group.NewCoordinator(3 * time.Second),
+	}
+	offsetLog, err := broker.Logs.Log("__consumer_offsets", 0)
+	if err != nil {
+		log.Fatal(err)
+	}
+	broker.Offsets, err = offset.NewStore(offsetLog)
+	if err != nil {
+		log.Fatal(err)
 	}
 	defer broker.Logs.Close()
 	broker.Topics.Add(topic.Topic{
@@ -100,6 +109,9 @@ func loadTopicsFromDataDir(broker *network.Broker, dataDir string) {
 func parseTopicPartitionDir(dir string) (string, int32, bool) {
 	separator := strings.LastIndex(dir, "-")
 	if separator <= 0 || separator == len(dir)-1 {
+		return "", 0, false
+	}
+	if strings.HasPrefix(dir[:separator], "__") {
 		return "", 0, false
 	}
 	partition, err := strconv.ParseInt(dir[separator+1:], 10, 32)

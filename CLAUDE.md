@@ -44,7 +44,7 @@ delegating it to Claude. Behave accordingly:
 
 ## Current status
 
-Phases 0–13 done. Next up: **Phase 14 — OffsetCommit / OffsetFetch + internal offsets log** (Track B).
+Phases 0–14 done. Next up: **Phase 15 — Real Range / RoundRobin assignors** (Track B).
 
 Full checklist with acceptance criteria per phase: [PROGRESS.md](PROGRESS.md).
 Update both this line and the matching checkbox in PROGRESS.md as phases

@@ -7,6 +7,7 @@ import (
 	"net"
 
 	"github.com/sorenhoang/gokaf/internal/group"
+	"github.com/sorenhoang/gokaf/internal/offset"
 	"github.com/sorenhoang/gokaf/internal/protocol"
 	"github.com/sorenhoang/gokaf/internal/storage"
 	"github.com/sorenhoang/gokaf/internal/topic"
@@ -21,6 +22,8 @@ var dispatchTable = map[int16]handlerFunc{
 	1:  (*Broker).handleFetch,
 	2:  (*Broker).handleListOffsets,
 	3:  (*Broker).handleMetadata,
+	8:  (*Broker).handleOffsetCommit,
+	9:  (*Broker).handleOffsetFetch,
 	10: (*Broker).handleFindCoordinator,
 	11: (*Broker).handleJoinGroup,
 	12: (*Broker).handleHeartbeat,
@@ -32,12 +35,13 @@ var dispatchTable = map[int16]handlerFunc{
 }
 
 type Broker struct {
-	NodeID int32
-	Host   string
-	Port   int32
-	Topics *topic.Registry
-	Logs   *storage.Manager
-	Groups *group.Coordinator
+	NodeID  int32
+	Host    string
+	Port    int32
+	Topics  *topic.Registry
+	Logs    *storage.Manager
+	Groups  *group.Coordinator
+	Offsets *offset.Store
 }
 
 func (b *Broker) Dispatch(conn net.Conn, payload []byte) error {

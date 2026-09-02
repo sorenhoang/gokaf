@@ -251,7 +251,7 @@
     <li class="done"><a href="#phase-11">Phase 11 — FindCoordinator</a></li>
     <li class="done"><a href="#phase-12">Phase 12 — JoinGroup/SyncGroup</a></li>
     <li class="done"><a href="#phase-13">Phase 13 — Heartbeat/LeaveGroup</a></li>
-    <li><a href="#phase-14">Phase 14 — Offset commit/fetch</a></li>
+    <li class="done"><a href="#phase-14">Phase 14 — Offset commit/fetch</a></li>
     <li><a href="#phase-15">Phase 15 — Real assignors</a></li>
   </ul>
 
@@ -490,7 +490,7 @@
       </dl>
     </div>
 
-    <div class="phase" id="phase-14">
+    <div class="phase done" id="phase-14">
       <h3><span class="phase-id">Phase 14</span> OffsetCommit / OffsetFetch (key=8/9) + internal offsets log</h3>
       <dl>
         <dt>Output</dt><dd>Use the Phase 6 storage engine to create an internal <code>__consumer_offsets</code> topic. Commit writes a record (group_id + topic + partition → offset); OffsetFetch reads the latest state.</dd>
