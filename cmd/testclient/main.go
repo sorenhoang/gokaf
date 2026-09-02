@@ -19,7 +19,7 @@ import (
 )
 
 func main() {
-	mode := flag.String("mode", "full", "test mode: full, produce-fetch, fetch-only, multi-partition, metadata-cluster, metadata-leaders, metadata-leaders-check, replica-sync, find-coordinator, consumer-group, consumer-group-rebalance, consumer-group-roundrobin, offset-commit-fetch, offset-commit, offset-fetch, idempotent-producer")
+	mode := flag.String("mode", "full", "test mode: full, produce-fetch, fetch-only, multi-partition, metadata-cluster, metadata-leaders, metadata-leaders-check, replica-sync, acks-all, find-coordinator, consumer-group, consumer-group-rebalance, consumer-group-roundrobin, offset-commit-fetch, offset-commit, offset-fetch, idempotent-producer")
 	addr := flag.String("addr", "localhost:9092", "broker address")
 	topicFlag := flag.String("topic", "", "topic name for targeted test modes")
 	n := flag.Int("n", 10, "record count for targeted test modes")
@@ -68,6 +68,8 @@ func main() {
 		checkMetadataLeaderCounts(conn, *topicFlag, 179)
 	case "replica-sync":
 		checkReplicaSync(conn, *topicFlag, *n)
+	case "acks-all":
+		checkAcksAll(conn, *topicFlag)
 	case "find-coordinator":
 		checkFindCoordinator(conn, "group-a", 100)
 		checkFindCoordinator(conn, "anything", 101)
@@ -1140,6 +1142,10 @@ func checkProduceToPartition(conn net.Conn, topic string, partition int32, value
 }
 
 func produceRawBatch(conn net.Conn, topic string, partition int32, batch []byte, correlationID int32) (int64, int16) {
+	return produceRawBatchWithAcks(conn, topic, partition, batch, correlationID, 1, 5000)
+}
+
+func produceRawBatchWithAcks(conn net.Conn, topic string, partition int32, batch []byte, correlationID int32, acks int16, timeoutMS int32) (int64, int16) {
 	header := protocol.RequestHeader{
 		APIKey:        0,
 		APIVersion:    0,
@@ -1149,8 +1155,8 @@ func produceRawBatch(conn net.Conn, topic string, partition int32, batch []byte,
 
 	e := protocol.NewEncoder()
 	protocol.WriteRequestHeader(e, header)
-	e.WriteInt16(1)
-	e.WriteInt32(5000)
+	e.WriteInt16(acks)
+	e.WriteInt32(timeoutMS)
 	e.WriteArrayLen(1)
 	e.WriteString(topic)
 	e.WriteArrayLen(1)
@@ -1685,6 +1691,40 @@ func checkReplicaSync(conn net.Conn, topicName string, count int) {
 
 	for _, addr := range []string{"localhost:9092", "localhost:9093", "localhost:9094"} {
 		waitForReplicaFetch(addr, topicName, int64(count), want)
+	}
+}
+
+func checkAcksAll(conn net.Conn, topicName string) {
+	if topicName == "" {
+		topicName = "acks-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	}
+	checkCreateTopicWithReplicationFactor(conn, topicName, 1, 3, 230, 0)
+
+	first := buildRecordBatch("acks-one", -1, -1, -1)
+	start := time.Now()
+	baseOffset, errorCode := produceRawBatchWithAcks(conn, topicName, 0, first, 231, 1, 10000)
+	acksOneDuration := time.Since(start)
+	if errorCode != 0 || baseOffset != 0 {
+		log.Fatal("unexpected acks=1 Produce response")
+	}
+	if acksOneDuration > 300*time.Millisecond {
+		log.Fatal("acks=1 Produce was too slow: " + acksOneDuration.String())
+	}
+
+	second := buildRecordBatch("acks-all", -1, -1, -1)
+	start = time.Now()
+	baseOffset, errorCode = produceRawBatchWithAcks(conn, topicName, 0, second, 232, -1, 10000)
+	acksAllDuration := time.Since(start)
+	if errorCode != 0 || baseOffset != 1 {
+		log.Fatal("unexpected acks=all Produce response")
+	}
+	if acksAllDuration < time.Second {
+		log.Fatal("acks=all Produce did not wait for the slow follower: " + acksAllDuration.String())
+	}
+
+	log.Printf("acks latency: acks=1 %s, acks=all %s", acksOneDuration, acksAllDuration)
+	for _, addr := range []string{"localhost:9092", "localhost:9093", "localhost:9094"} {
+		waitForReplicaFetch(addr, topicName, 2, []string{"acks-one", "acks-all"})
 	}
 }
 

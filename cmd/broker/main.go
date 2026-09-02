@@ -26,6 +26,7 @@ func main() {
 	id := flag.Int("id", 1, "broker id")
 	port := flag.Int("port", 9092, "listen port")
 	peers := flag.String("peers", "", "comma-separated id@host:port for every broker, including this one")
+	replicaFetchInterval := flag.Duration("replica-fetch-interval", 200*time.Millisecond, "interval between follower replica fetches")
 	dataDir := flag.String("data", "./data", "directory for partition log segments")
 	flag.Parse()
 
@@ -46,7 +47,7 @@ func main() {
 		Producers: producer.NewManager(),
 		Cluster:   membership,
 	}
-	broker.Replication = replication.NewManager(nodeID, broker.Logs, membership, 200*time.Millisecond)
+	broker.Replication = replication.NewManager(nodeID, broker.Logs, membership, *replicaFetchInterval)
 	defer broker.Replication.StopAll()
 	offsetLog, err := broker.Logs.Log("__consumer_offsets", 0)
 	if err != nil {

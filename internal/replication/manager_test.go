@@ -62,6 +62,7 @@ func TestFetcherFetchOnceAppendsLeaderBatchesByteIdentically(t *testing.T) {
 	f := fetcher{
 		topic:     "orders",
 		partition: 0,
+		selfID:    2,
 		leader:    cluster.Broker{ID: 1, Host: host, Port: port},
 		localLog:  localLog,
 		maxBytes:  1 << 20,
@@ -79,6 +80,19 @@ func TestFetcherFetchOnceAppendsLeaderBatchesByteIdentically(t *testing.T) {
 	}
 	if !bytes.Equal(followerBytes, leaderBytes) {
 		t.Fatalf("follower log bytes differ from leader\nleader:   % x\nfollower: % x", leaderBytes, followerBytes)
+	}
+}
+
+func TestBuildFetchRequestUsesReplicaID(t *testing.T) {
+	body := buildFetchRequest(2, "orders", 0, 5, 1024)
+	dec := protocol.NewDecoder(bytes.NewReader(body))
+
+	replicaID, err := dec.ReadInt32()
+	if err != nil {
+		t.Fatalf("ReadInt32 replica id: %v", err)
+	}
+	if replicaID != 2 {
+		t.Fatalf("replica_id = %d, want 2", replicaID)
 	}
 }
 

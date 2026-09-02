@@ -23,7 +23,8 @@ type fetchPartitionResponse struct {
 func (b *Broker) handleFetch(header protocol.RequestHeader, body []byte) ([]byte, error) {
 	dec := protocol.NewDecoder(bytes.NewReader(body))
 
-	if _, err := dec.ReadInt32(); err != nil {
+	replicaID, err := dec.ReadInt32()
+	if err != nil {
 		return nil, err
 	}
 	if _, err := dec.ReadInt32(); err != nil {
@@ -66,7 +67,7 @@ func (b *Broker) handleFetch(header protocol.RequestHeader, body []byte) ([]byte
 				return nil, err
 			}
 
-			topicResponse.partitions = append(topicResponse.partitions, b.fetchPartition(topicName, partitionIndex, fetchOffset, partitionMaxBytes))
+			topicResponse.partitions = append(topicResponse.partitions, b.fetchPartition(replicaID, topicName, partitionIndex, fetchOffset, partitionMaxBytes))
 		}
 		responses = append(responses, topicResponse)
 	}
@@ -76,7 +77,7 @@ func (b *Broker) handleFetch(header protocol.RequestHeader, body []byte) ([]byte
 	return e.Bytes(), nil
 }
 
-func (b *Broker) fetchPartition(topicName string, partitionIndex int32, fetchOffset int64, partitionMaxBytes int32) fetchPartitionResponse {
+func (b *Broker) fetchPartition(replicaID int32, topicName string, partitionIndex int32, fetchOffset int64, partitionMaxBytes int32) fetchPartitionResponse {
 	response := fetchPartitionResponse{index: partitionIndex}
 
 	t, ok := b.Topics.Get(topicName)
@@ -92,13 +93,21 @@ func (b *Broker) fetchPartition(topicName string, partitionIndex int32, fetchOff
 		return response
 	}
 
-	highWatermark := partitionLog.EndOffset()
+	endOffset := partitionLog.EndOffset()
+	if replicaID >= 0 && b.Replication != nil {
+		b.Replication.RecordFollowerFetch(topicName, partitionIndex, replicaID, fetchOffset, endOffset)
+	}
+
+	highWatermark := endOffset
+	if b.Replication != nil {
+		highWatermark = b.Replication.HighWatermark(topicName, partitionIndex, endOffset)
+	}
 	response.highWatermark = highWatermark
-	if fetchOffset < 0 || fetchOffset > highWatermark {
+	if fetchOffset < 0 || fetchOffset > endOffset {
 		response.errorCode = protocol.ErrOffsetOutOfRange
 		return response
 	}
-	if fetchOffset == highWatermark {
+	if fetchOffset == endOffset {
 		response.errorCode = protocol.ErrNone
 		return response
 	}

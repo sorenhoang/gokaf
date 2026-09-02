@@ -79,7 +79,7 @@ not "done." Update this file as phases complete; keep `CLAUDE.md`'s
 - [x] **Phase 19** — ReplicaFetcher — follower replication
       AC: Produce to the leader → within a few seconds, the follower
       brokers' log files have matching checksums.
-- [ ] **Phase 20** — ISR tracking + high-watermark + acks=all
+- [x] **Phase 20** — ISR tracking + high-watermark + acks=all
       AC: Simulate a slow follower (delay its fetch loop) →
       Produce(acks=all) blocks/waits correctly, while Produce(acks=1)
       returns immediately without waiting.

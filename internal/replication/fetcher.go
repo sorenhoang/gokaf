@@ -15,6 +15,7 @@ import (
 type fetcher struct {
 	topic     string
 	partition int32
+	selfID    int32
 	leader    cluster.Broker
 	localLog  *storage.Log
 	interval  time.Duration
@@ -36,7 +37,7 @@ func (f *fetcher) run(ctx context.Context) {
 
 func (f *fetcher) fetchOnce() {
 	from := f.localLog.EndOffset()
-	body := buildFetchRequest(f.topic, f.partition, from, f.maxBytes)
+	body := buildFetchRequest(f.selfID, f.topic, f.partition, from, f.maxBytes)
 	resp, err := cluster.NewBrokerClient(f.leader).Send(protocol.RequestHeader{APIKey: 1, APIVersion: 0, CorrelationID: 1}, body)
 	if err != nil {
 		log.Printf("replica %s-%d: fetch from broker %d: %v", f.topic, f.partition, f.leader.ID, err)
@@ -60,9 +61,9 @@ func (f *fetcher) fetchOnce() {
 	}
 }
 
-func buildFetchRequest(topicName string, partition int32, offset int64, maxBytes int32) []byte {
+func buildFetchRequest(replicaID int32, topicName string, partition int32, offset int64, maxBytes int32) []byte {
 	e := protocol.NewEncoder()
-	e.WriteInt32(-1)
+	e.WriteInt32(replicaID)
 	e.WriteInt32(0)
 	e.WriteInt32(1)
 	e.WriteArrayLen(1)

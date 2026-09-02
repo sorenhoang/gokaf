@@ -15,8 +15,10 @@ type Manager struct {
 	logs       *storage.Manager
 	membership *cluster.Membership
 	interval   time.Duration
+	lagTimeout time.Duration
 	mu         sync.Mutex
 	fetchers   map[tp]context.CancelFunc
+	led        map[tp]*PartitionState
 }
 
 type tp struct {
@@ -30,13 +32,24 @@ func NewManager(selfID int32, logs *storage.Manager, membership *cluster.Members
 		logs:       logs,
 		membership: membership,
 		interval:   interval,
+		lagTimeout: 10 * time.Second,
 		fetchers:   map[tp]context.CancelFunc{},
+		led:        map[tp]*PartitionState{},
 	}
 }
 
 func (m *Manager) StartFollowing(t topic.Topic) {
 	for _, partition := range t.Partitions {
-		if len(partition.Replicas) == 0 || partition.Replicas[0] == m.selfID || !containsBroker(partition.Replicas, m.selfID) {
+		if len(partition.Replicas) == 0 || !containsBroker(partition.Replicas, m.selfID) {
+			continue
+		}
+		key := tp{topic: t.Name, partition: partition.ID}
+		if partition.Replicas[0] == m.selfID {
+			m.mu.Lock()
+			if _, ok := m.led[key]; !ok {
+				m.led[key] = NewPartitionState(partition.Replicas, m.selfID, m.lagTimeout)
+			}
+			m.mu.Unlock()
 			continue
 		}
 		leader, ok := m.membership.Get(partition.Leader)
@@ -48,7 +61,6 @@ func (m *Manager) StartFollowing(t topic.Topic) {
 			continue
 		}
 
-		key := tp{topic: t.Name, partition: partition.ID}
 		m.mu.Lock()
 		if _, ok := m.fetchers[key]; ok {
 			m.mu.Unlock()
@@ -61,6 +73,7 @@ func (m *Manager) StartFollowing(t topic.Topic) {
 		f := fetcher{
 			topic:     t.Name,
 			partition: partition.ID,
+			selfID:    m.selfID,
 			leader:    leader,
 			localLog:  localLog,
 			interval:  m.interval,
@@ -68,6 +81,47 @@ func (m *Manager) StartFollowing(t topic.Topic) {
 		}
 		go f.run(ctx)
 	}
+}
+
+func (m *Manager) RecordFollowerFetch(topic string, partition, brokerID int32, fetchOffset, leaderEndOffset int64) {
+	state := m.partitionState(topic, partition)
+	if state == nil {
+		return
+	}
+	state.RecordFollowerFetch(brokerID, fetchOffset, leaderEndOffset)
+}
+
+func (m *Manager) WaitForHighWatermark(topic string, partition int32, target int64, timeout time.Duration) error {
+	state := m.partitionState(topic, partition)
+	if state == nil {
+		return nil
+	}
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	return state.WaitForHighWatermark(target, timeout)
+}
+
+func (m *Manager) HighWatermark(topic string, partition int32, leaderEndOffset int64) int64 {
+	state := m.partitionState(topic, partition)
+	if state == nil {
+		return leaderEndOffset
+	}
+	return state.HighWatermark(leaderEndOffset)
+}
+
+func (m *Manager) ISR(topic string, partition int32) []int32 {
+	state := m.partitionState(topic, partition)
+	if state == nil {
+		return nil
+	}
+	return state.ISR()
+}
+
+func (m *Manager) partitionState(topic string, partition int32) *PartitionState {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.led[tp{topic: topic, partition: partition}]
 }
 
 func (m *Manager) StopAll() {

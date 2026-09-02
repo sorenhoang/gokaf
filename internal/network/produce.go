@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"hash/crc32"
 	"log"
+	"time"
 
 	"github.com/sorenhoang/gokaf/internal/producer"
 	"github.com/sorenhoang/gokaf/internal/protocol"
@@ -29,10 +30,12 @@ func (b *Broker) handleProduce(header protocol.RequestHeader, body []byte) ([]by
 	reader := bytes.NewReader(body)
 	dec := protocol.NewDecoder(reader)
 
-	if _, err := dec.ReadInt16(); err != nil {
+	acks, err := dec.ReadInt16()
+	if err != nil {
 		return nil, err
 	}
-	if _, err := dec.ReadInt32(); err != nil {
+	timeoutMS, err := dec.ReadInt32()
+	if err != nil {
 		return nil, err
 	}
 	topicCount, err := dec.ReadArrayLen()
@@ -65,7 +68,7 @@ func (b *Broker) handleProduce(header protocol.RequestHeader, body []byte) ([]by
 				return nil, err
 			}
 
-			topicResponse.partitions = append(topicResponse.partitions, b.producePartition(topicName, partitionIndex, batch))
+			topicResponse.partitions = append(topicResponse.partitions, b.producePartition(topicName, partitionIndex, batch, acks, timeoutMS))
 		}
 		responses = append(responses, topicResponse)
 	}
@@ -75,7 +78,7 @@ func (b *Broker) handleProduce(header protocol.RequestHeader, body []byte) ([]by
 	return e.Bytes(), nil
 }
 
-func (b *Broker) producePartition(topicName string, partitionIndex int32, batch []byte) producePartitionResponse {
+func (b *Broker) producePartition(topicName string, partitionIndex int32, batch []byte, acks int16, timeoutMS int32) producePartitionResponse {
 	response := producePartitionResponse{index: partitionIndex, errorCode: protocol.ErrUnknown, baseOffset: -1}
 
 	t, ok := b.Topics.Get(topicName)
@@ -123,6 +126,9 @@ func (b *Broker) producePartition(topicName string, partitionIndex int32, batch 
 			response.errorCode = protocol.ErrUnknown
 			response.baseOffset = -1
 		}
+		if check.Decision == producer.Append {
+			b.waitForAllAcks(topicName, partitionIndex, response.baseOffset, acks, timeoutMS, &response)
+		}
 		// An idempotent batch never falls through to the plain append below —
 		// AppendBatch already did (or refused) the write under the PID lock.
 		return response
@@ -138,7 +144,18 @@ func (b *Broker) producePartition(topicName string, partitionIndex int32, batch 
 
 	response.errorCode = protocol.ErrNone
 	response.baseOffset = baseOffset
+	b.waitForAllAcks(topicName, partitionIndex, baseOffset, acks, timeoutMS, &response)
 	return response
+}
+
+func (b *Broker) waitForAllAcks(topicName string, partitionIndex int32, baseOffset int64, acks int16, timeoutMS int32, response *producePartitionResponse) {
+	if acks != -1 || response.errorCode != protocol.ErrNone || b.Replication == nil {
+		return
+	}
+	timeout := time.Duration(timeoutMS) * time.Millisecond
+	if err := b.Replication.WaitForHighWatermark(topicName, partitionIndex, baseOffset+1, timeout); err != nil {
+		response.errorCode = protocol.ErrRequestTimedOut
+	}
 }
 
 func validRecordBatch(batch []byte) bool {
