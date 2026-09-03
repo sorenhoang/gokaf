@@ -1,9 +1,13 @@
 # gokaf — Phase Progress
 
-Tracking checklist for [docs/master-plan.html](docs/master-plan.html). Check a
-phase off only once its acceptance criteria actually passes — "compiles" is
-not "done." Update this file as phases complete; keep `CLAUDE.md`'s
-"Current status" line in sync with the last checked phase.
+**All 28 phases complete.** Every box below passed its acceptance criterion
+(verified with the hand-written `cmd/testclient`, `curl`, or the browser — never
+"compiles"). See [README.md](README.md) for what the finished broker does and
+how to run it, and [docs/master-plan.html](docs/master-plan.html) for the full
+plan.
+
+Historic checklist follows; it was kept in sync with `CLAUDE.md`'s "Current
+status" line as each phase landed.
 
 ## Track A — Protocol & Single-Broker Core (Phases 0–10)
 
