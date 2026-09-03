@@ -94,7 +94,7 @@ not "done." Update this file as phases complete; keep `CLAUDE.md`'s
       AC: Kill the current controller → the cluster elects exactly one new
       controller within a few seconds, with no split-brain, under the
       simplifying assumption that there's no network partition in the test.
-- [ ] **Phase 23** — KRaft-style metadata log (optional)
+- [x] **Phase 23** — KRaft-style metadata log (optional)
       AC: Restart the entire cluster → every broker replays the log and
       ends up with identical metadata.
 

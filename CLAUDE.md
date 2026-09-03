@@ -44,7 +44,7 @@ delegating it to Claude. Behave accordingly:
 
 ## Current status
 
-Phases 0–22 done. Next up: **Phase 23 — Cluster metadata log** (Track E).
+Phases 0–23 done. Next up: **Phase 24 — Broker operations layer + HTTP skeleton** (Track F).
 
 Full checklist with acceptance criteria per phase: [PROGRESS.md](PROGRESS.md).
 Update both this line and the matching checkbox in PROGRESS.md as phases

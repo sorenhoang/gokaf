@@ -593,7 +593,7 @@
       </dl>
     </div>
 
-    <div class="phase" id="phase-23">
+    <div class="phase done" id="phase-23">
       <h3><span class="phase-id">Phase 23</span> KRaft-style metadata log (optional)</h3>
       <dl>
         <dt>Output</dt><dd>The controller writes every cluster change (topic create/delete, leader changes, broker join/leave) to its own append-only log (reusing the Track A storage engine). Other brokers replay this log to stay in sync — this is the core idea behind KRaft.</dd>

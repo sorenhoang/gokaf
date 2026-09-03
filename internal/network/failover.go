@@ -3,6 +3,8 @@ package network
 import (
 	"log"
 	"sort"
+
+	"github.com/sorenhoang/gokaf/internal/cluster"
 )
 
 // OnPeerDown lets only the elected controller decide replacements for a dead
@@ -37,6 +39,14 @@ func (b *Broker) OnPeerDown(deadID int32) {
 			changed = true
 		}
 		if changed {
+			if b.MetadataLog != nil {
+				if _, err := b.MetadataLog.Append(cluster.Record{Type: cluster.TopicUpsert, Topic: t.Name, Partitions: t.Partitions}); err != nil {
+					log.Printf("append failover metadata for %s: %v", t.Name, err)
+					continue
+				}
+				b.ApplyMetadataRecord(cluster.Record{Type: cluster.TopicUpsert, Topic: t.Name, Partitions: t.Partitions})
+				continue
+			}
 			b.applyTopic(t.Name, t.Partitions)
 			b.fanOutTopic(t.Name, t.Partitions)
 		}

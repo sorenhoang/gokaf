@@ -38,6 +38,10 @@ func (b *Broker) handleCreateTopics(header protocol.RequestHeader, body []byte) 
 			return nil, err
 		}
 
+		if b.MetadataLog != nil && b.controllerID() != b.NodeID {
+			results = append(results, topicResult{name: name, code: protocol.ErrNotController})
+			continue
+		}
 		results = append(results, topicResult{
 			name: name,
 			code: b.createTopic(name, numPartitions, replicationFactor, true),
@@ -74,14 +78,25 @@ func (b *Broker) createTopic(name string, numPartitions int32, replicationFactor
 		}
 	}
 
-	err := b.Topics.Create(topic.Topic{Name: name, Partitions: partitions})
+	t := topic.Topic{Name: name, Partitions: partitions}
+	if b.MetadataLog != nil {
+		if _, exists := b.Topics.Get(name); exists {
+			return protocol.ErrTopicAlreadyExists
+		}
+		if _, err := b.MetadataLog.Append(cluster.Record{Type: cluster.TopicUpsert, Topic: name, Partitions: partitions}); err != nil {
+			return protocol.ErrUnknown
+		}
+		b.ApplyMetadataRecord(cluster.Record{Type: cluster.TopicUpsert, Topic: name, Partitions: partitions})
+		return protocol.ErrNone
+	}
+
+	err := b.Topics.Create(t)
 	switch {
 	case errors.Is(err, topic.ErrTopicExists):
 		return protocol.ErrTopicAlreadyExists
 	case err != nil:
 		return protocol.ErrUnknown
 	default:
-		t := topic.Topic{Name: name, Partitions: partitions}
 		if b.Replication != nil {
 			b.Replication.StartFollowing(t)
 		}

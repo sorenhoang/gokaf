@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 
+	"github.com/sorenhoang/gokaf/internal/cluster"
 	"github.com/sorenhoang/gokaf/internal/protocol"
 	"github.com/sorenhoang/gokaf/internal/topic"
 )
@@ -27,6 +28,10 @@ func (b *Broker) handleDeleteTopics(header protocol.RequestHeader, body []byte) 
 			return nil, err
 		}
 
+		if b.MetadataLog != nil && b.controllerID() != b.NodeID {
+			results = append(results, topicResult{name: name, code: protocol.ErrNotController})
+			continue
+		}
 		results = append(results, topicResult{
 			name: name,
 			code: b.deleteTopic(name),
@@ -43,6 +48,16 @@ func (b *Broker) handleDeleteTopics(header protocol.RequestHeader, body []byte) 
 }
 
 func (b *Broker) deleteTopic(name string) int16 {
+	if b.MetadataLog != nil {
+		if _, ok := b.Topics.Get(name); !ok {
+			return protocol.ErrUnknownTopicOrPartition
+		}
+		if _, err := b.MetadataLog.Append(cluster.Record{Type: cluster.TopicDelete, Topic: name}); err != nil {
+			return protocol.ErrUnknown
+		}
+		b.ApplyMetadataRecord(cluster.Record{Type: cluster.TopicDelete, Topic: name})
+		return protocol.ErrNone
+	}
 	err := b.Topics.Delete(name)
 	switch {
 	case errors.Is(err, topic.ErrTopicNotFound):

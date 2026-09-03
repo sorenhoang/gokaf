@@ -38,6 +38,7 @@ var dispatchTable = map[int16]handlerFunc{
 	22:   (*Broker).handleInitProducerID,
 	1000: (*Broker).handleApplyTopic, // internalApplyTopicKey
 	1001: (*Broker).handlePing,       // cluster.InternalPingKey
+	1002: (*Broker).handleFetchMetadataLog,
 }
 
 type Broker struct {
@@ -53,6 +54,7 @@ type Broker struct {
 	Replication  *replication.Manager
 	IsPeerAlive  func(int32) bool
 	ControllerID func() int32
+	MetadataLog  *cluster.MetadataLog
 }
 
 func (b *Broker) Dispatch(conn net.Conn, payload []byte) error {

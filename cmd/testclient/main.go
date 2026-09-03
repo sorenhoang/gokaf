@@ -11,6 +11,7 @@ import (
 	"net"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/sorenhoang/gokaf/internal/assignor"
@@ -19,7 +20,7 @@ import (
 )
 
 func main() {
-	mode := flag.String("mode", "full", "test mode: full, produce-fetch, fetch-only, multi-partition, metadata-cluster, metadata-leaders, metadata-leaders-check, replica-sync, acks-all, find-coordinator, consumer-group, consumer-group-rebalance, consumer-group-roundrobin, offset-commit-fetch, offset-commit, offset-fetch, idempotent-producer, failover-produce, failover-verify, controller-produce, controller-verify")
+	mode := flag.String("mode", "full", "test mode: full, produce-fetch, fetch-only, multi-partition, metadata-cluster, metadata-leaders, metadata-leaders-check, metadata-snapshot, create-topic, replica-sync, acks-all, find-coordinator, consumer-group, consumer-group-rebalance, consumer-group-roundrobin, offset-commit-fetch, offset-commit, offset-fetch, idempotent-producer, failover-produce, failover-verify, controller-produce, controller-verify")
 	addr := flag.String("addr", "localhost:9092", "broker address")
 	topicFlag := flag.String("topic", "", "topic name for targeted test modes")
 	n := flag.Int("n", 10, "record count for targeted test modes")
@@ -66,6 +67,10 @@ func main() {
 			log.Fatal("-topic is required for metadata-leaders-check")
 		}
 		checkMetadataLeaderCounts(conn, *topicFlag, 179)
+	case "metadata-snapshot":
+		checkMetadataSnapshot(conn, *topicFlag, 179)
+	case "create-topic":
+		checkCreateTopicViaController(conn, *topicFlag, int32(*n))
 	case "replica-sync":
 		checkReplicaSync(conn, *topicFlag, *n)
 	case "acks-all":
@@ -1082,6 +1087,19 @@ func checkCreateTopic(conn net.Conn, name string, partitions int32, correlationI
 }
 
 func checkCreateTopicWithReplicationFactor(conn net.Conn, name string, partitions int32, replicationFactor int16, correlationID int32, wantCode int16) {
+	// CreateTopics only succeeds on the controller (NOT_CONTROLLER elsewhere
+	// once the metadata log is active), so route to whoever Metadata names.
+	controllerID, brokers := fetchMetadataController(conn, correlationID)
+	target := conn
+	if controller, ok := findMetadataBroker(brokers, controllerID); ok {
+		dialed, err := net.Dial("tcp", net.JoinHostPort(controller.host, strconv.Itoa(int(controller.port))))
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer dialed.Close()
+		target = dialed
+	}
+
 	header := protocol.RequestHeader{
 		APIKey:        19,
 		APIVersion:    0,
@@ -1098,7 +1116,64 @@ func checkCreateTopicWithReplicationFactor(conn net.Conn, name string, partition
 	e.WriteArrayLen(0)
 	e.WriteArrayLen(0)
 	e.WriteInt32(5000)
-	writeAndAssertTopicResult(conn, e.Bytes(), correlationID, "create_topics", name, wantCode)
+	writeAndAssertTopicResult(target, e.Bytes(), correlationID, "create_topics", name, wantCode)
+
+	if wantCode == 0 {
+		waitForTopicVisible(conn, name, correlationID)
+	}
+}
+
+// waitForTopicVisible polls Metadata on conn until name appears — the metadata
+// log propagates to non-controller brokers asynchronously, so a create on the
+// controller isn't instantly visible on the broker the caller will produce to.
+func waitForTopicVisible(conn net.Conn, name string, correlationID int32) {
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if metadataHasTopic(conn, name, correlationID) {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	log.Fatal("topic " + name + " did not become visible on the target broker")
+}
+
+func metadataHasTopic(conn net.Conn, name string, correlationID int32) bool {
+	header := protocol.RequestHeader{APIKey: 3, APIVersion: 0, CorrelationID: correlationID}
+	e := protocol.NewEncoder()
+	protocol.WriteRequestHeader(e, header)
+	e.WriteArrayLen(0)
+	if err := network.WriteFrame(conn, e.Bytes()); err != nil {
+		log.Fatal(err)
+	}
+	respPayload, err := network.ReadFrame(conn)
+	if err != nil {
+		log.Fatal(err)
+	}
+	dec := protocol.NewDecoder(bytes.NewReader(respPayload))
+	if _, err := protocol.ReadResponseHeader(dec); err != nil {
+		log.Fatal(err)
+	}
+	readMetadataHeader(dec)
+	topicCount := mustReadArrayLen(dec, "topic count")
+	for i := 0; i < topicCount; i++ {
+		errorCode := mustReadInt16(dec, "topic error_code")
+		topicName, err := dec.ReadString()
+		if err != nil {
+			log.Fatal(fmt.Errorf("read topic name: %w", err))
+		}
+		partitionCount := mustReadArrayLen(dec, "partition count")
+		for j := 0; j < partitionCount; j++ {
+			mustReadInt16(dec, "partition error_code")
+			mustReadInt32(dec, "partition index")
+			mustReadInt32(dec, "partition leader_id")
+			drainMetadataIDs(dec, "replica")
+			drainMetadataIDs(dec, "isr")
+		}
+		if errorCode == 0 && topicName == name {
+			return true
+		}
+	}
+	return false
 }
 
 func checkCreateTopicsDuplicate(conn net.Conn) {
@@ -1851,6 +1926,111 @@ func checkControllerVerify(conn net.Conn, topicName string) {
 	}
 	checkFetchFromPartition(leaderConn, topicName, 2, 0, 285, 2, []string{"before-controller-fail", "after-controller-fail"})
 	log.Printf("controller election verified: topic=%s controller=%d leaders=%v", topicName, controllerID, leaders)
+}
+
+func checkMetadataSnapshot(conn net.Conn, topicName string, correlationID int32) {
+	header := protocol.RequestHeader{APIKey: 3, APIVersion: 0, CorrelationID: correlationID}
+	e := protocol.NewEncoder()
+	protocol.WriteRequestHeader(e, header)
+	e.WriteArrayLen(0)
+	if err := network.WriteFrame(conn, e.Bytes()); err != nil {
+		log.Fatal(err)
+	}
+	respPayload, err := network.ReadFrame(conn)
+	if err != nil {
+		log.Fatal(err)
+	}
+	dec := protocol.NewDecoder(bytes.NewReader(respPayload))
+	respHeader, err := protocol.ReadResponseHeader(dec)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if respHeader.CorrelationID != correlationID {
+		log.Fatal("unexpected Metadata correlation_id=" + strconv.Itoa(int(respHeader.CorrelationID)))
+	}
+	brokers, controllerID := readMetadataHeader(dec)
+	topicCount := mustReadArrayLen(dec, "topic count")
+	snapshots := make([]string, 0, topicCount)
+	for i := 0; i < topicCount; i++ {
+		topicErrorCode := mustReadInt16(dec, "topic error_code")
+		name, err := dec.ReadString()
+		if err != nil {
+			log.Fatal(fmt.Errorf("read topic name: %w", err))
+		}
+		partitionCount := mustReadArrayLen(dec, "partition count")
+		partitions := make([]string, 0, partitionCount)
+		for j := 0; j < partitionCount; j++ {
+			partitionErrorCode := mustReadInt16(dec, "partition error_code")
+			partitionID := mustReadInt32(dec, "partition index")
+			leaderID := mustReadInt32(dec, "partition leader_id")
+			replicas := readMetadataIDsForSnapshot(dec, "replica")
+			isr := readMetadataIDsForSnapshot(dec, "isr")
+			if topicErrorCode == 0 && partitionErrorCode == 0 {
+				partitions = append(partitions, fmt.Sprintf("%d:%d:%v:%v", partitionID, leaderID, replicas, isr))
+			}
+		}
+		if topicName == "" || topicName == name {
+			snapshots = append(snapshots, name+"["+strings.Join(partitions, ",")+"]")
+		}
+	}
+	sort.Strings(snapshots)
+	log.Printf("metadata snapshot: controller=%d brokers=%v topics=%s", controllerID, brokers, strings.Join(snapshots, ";"))
+}
+
+func checkCreateTopicViaController(conn net.Conn, topicName string, partitions int32) {
+	if topicName == "" {
+		log.Fatal("-topic is required for create-topic")
+	}
+	// checkCreateTopicWithReplicationFactor already routes to the controller.
+	checkCreateTopicWithReplicationFactor(conn, topicName, partitions, 3, 287, 0)
+}
+
+func fetchMetadataController(conn net.Conn, correlationID int32) (int32, []metadataBroker) {
+	header := protocol.RequestHeader{APIKey: 3, APIVersion: 0, CorrelationID: correlationID}
+	e := protocol.NewEncoder()
+	protocol.WriteRequestHeader(e, header)
+	e.WriteArrayLen(0)
+	if err := network.WriteFrame(conn, e.Bytes()); err != nil {
+		log.Fatal(err)
+	}
+	respPayload, err := network.ReadFrame(conn)
+	if err != nil {
+		log.Fatal(err)
+	}
+	dec := protocol.NewDecoder(bytes.NewReader(respPayload))
+	respHeader, err := protocol.ReadResponseHeader(dec)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if respHeader.CorrelationID != correlationID {
+		log.Fatal("unexpected Metadata correlation_id=" + strconv.Itoa(int(respHeader.CorrelationID)))
+	}
+	brokers, controllerID := readMetadataHeader(dec)
+	topicCount := mustReadArrayLen(dec, "topic count")
+	for i := 0; i < topicCount; i++ {
+		mustReadInt16(dec, "topic error_code")
+		if _, err := dec.ReadString(); err != nil {
+			log.Fatal(fmt.Errorf("read topic name: %w", err))
+		}
+		partitionCount := mustReadArrayLen(dec, "partition count")
+		for j := 0; j < partitionCount; j++ {
+			mustReadInt16(dec, "partition error_code")
+			mustReadInt32(dec, "partition index")
+			mustReadInt32(dec, "partition leader_id")
+			drainMetadataIDs(dec, "replica")
+			drainMetadataIDs(dec, "isr")
+		}
+	}
+	return controllerID, brokers
+}
+
+func readMetadataIDsForSnapshot(dec *protocol.Decoder, field string) []int32 {
+	count := mustReadArrayLen(dec, field+" count")
+	ids := make([]int32, 0, count)
+	for i := 0; i < count; i++ {
+		ids = append(ids, mustReadInt32(dec, field+" node_id"))
+	}
+	return ids
 }
 
 func waitForReplicaFetch(addr string, topicName string, wantHighWatermark int64, wantValues []string) {
