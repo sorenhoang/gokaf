@@ -203,7 +203,23 @@ func New(b *network.Broker) http.Handler {
 
 	mux.Handle("/", staticHandler())
 
-	return mux
+	// The UI fetches every broker in brokers.ts, so /api needs permissive CORS
+	// for the cross-origin admin calls. Everything here is read/inspect plus
+	// deliberate chaos toggles — there is no auth anywhere in the broker.
+	return withCORS(mux)
+}
+
+func withCORS(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		h.ServeHTTP(w, r)
+	})
 }
 
 var errNoFaults = errors.New("fault injection unavailable")

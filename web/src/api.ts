@@ -112,19 +112,39 @@ export async function loadCluster(): Promise<ClusterView> {
   };
 }
 
-// --- actions (target the first broker; it routes/errors as needed) ---
+// --- actions ---
 
 const primary = BROKERS[0];
 
+// onController runs fn against each broker until one isn't "not controller"
+// (HTTP 421) — CreateTopics/DeleteTopics only succeed on the elected controller.
+async function onController<T>(fn: (base: string) => Promise<T>): Promise<T> {
+  let lastErr: unknown;
+  for (const base of BROKERS) {
+    try {
+      return await fn(base);
+    } catch (e) {
+      lastErr = e;
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!/not controller/i.test(msg)) throw e;
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+}
+
 export function createTopic(name: string, partitions: number, replicationFactor: number) {
-  return req<{ name: string }>(primary, "/api/v1/topics", {
-    method: "POST",
-    body: JSON.stringify({ name, partitions, replication_factor: replicationFactor }),
-  });
+  return onController((base) =>
+    req<{ name: string }>(base, "/api/v1/topics", {
+      method: "POST",
+      body: JSON.stringify({ name, partitions, replication_factor: replicationFactor }),
+    }),
+  );
 }
 
 export function deleteTopic(name: string) {
-  return req<void>(primary, `/api/v1/topics/${encodeURIComponent(name)}`, { method: "DELETE" });
+  return onController((base) =>
+    req<void>(base, `/api/v1/topics/${encodeURIComponent(name)}`, { method: "DELETE" }),
+  );
 }
 
 export function produce(base: string, topic: string, partition: number, key: string, value: string) {
