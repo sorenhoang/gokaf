@@ -278,7 +278,7 @@
   <h2>Track F — Kafka UI</h2>
   <ul>
     <li><a href="#phase-24">Phase 24 — Ops layer + HTTP skeleton</a></li>
-    <li><a href="#phase-25">Phase 25 — RecordBatch codec + produce/fetch API</a></li>
+    <li class="done"><a href="#phase-25">Phase 25 — RecordBatch codec + produce/fetch API</a></li>
     <li><a href="#phase-26">Phase 26 — React dashboard + console</a></li>
     <li><a href="#phase-27">Phase 27 — Consumer-group + producer panels</a></li>
     <li><a href="#phase-28">Phase 28 — Cluster view + failure injection</a></li>
@@ -624,7 +624,7 @@
       </dl>
     </div>
 
-    <div class="phase" id="phase-25">
+    <div class="phase done" id="phase-25">
       <h3><span class="phase-id">Phase 25</span> Shared RecordBatch codec + produce/fetch API</h3>
       <dl>
         <dt>Output</dt><dd>Move the v2 RecordBatch encode/decode out of <code>cmd/testclient</code> into a shared package (<code>internal/protocol/recordbatch.go</code>); <code>testclient</code> uses it. HTTP action endpoints: <code>POST /api/v1/topics</code>, <code>DELETE /api/v1/topics/{name}</code>, <code>POST /api/v1/produce</code> (<code>{topic, partition, key?, value}</code> → builds a batch, calls <code>b.Produce</code>, returns <code>{base_offset}</code>), <code>POST /api/v1/fetch</code> (calls <code>b.Fetch</code>, decodes each batch into <code>{offset, key, value, timestamp}</code>). Each edge maps <code>error</code> → HTTP status + <code>{"error": "..."}</code>.</dd>

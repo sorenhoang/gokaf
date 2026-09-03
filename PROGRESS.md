@@ -108,7 +108,7 @@ plan to be written when the track starts.
       AC: `curl localhost:8080/api/v1/topics` returns the correct
       topic/partition/offset list as JSON; every existing Kafka wire test
       still passes unchanged.
-- [ ] **Phase 25** — Shared RecordBatch codec + produce/fetch API
+- [x] **Phase 25** — Shared RecordBatch codec + produce/fetch API
       AC: Produce a keyed message via `curl`, fetch it back via `curl` →
       decoded key/value match, on-disk bytes identical to a wire Produce.
 - [ ] **Phase 26** — React dashboard + console

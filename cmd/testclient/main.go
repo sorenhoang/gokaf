@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"hash/crc32"
-	"io"
 	"log"
 	"net"
 	"sort"
@@ -1562,105 +1561,31 @@ func writeAndAssertTopicResult(conn net.Conn, request []byte, correlationID int3
 	}
 }
 
+// buildRecordBatch encodes a single-record batch via the shared codec. When
+// producerID >= 0 it re-stamps the idempotent producer fields and recomputes
+// the CRC — the shared codec only builds non-idempotent batches.
 func buildRecordBatch(value string, producerID int64, producerEpoch int16, baseSequence int32) []byte {
-	record := buildRecord(value)
-	batch := make([]byte, 61, 61+len(record))
-
-	binary.BigEndian.PutUint64(batch[0:8], 0)
-	putInt32(batch[12:16], -1)
-	batch[16] = 2
-	putInt16(batch[21:23], 0)
-	putInt32(batch[23:27], 0)
-	putInt64(batch[27:35], 1700000000000)
-	putInt64(batch[35:43], 1700000000000)
-	putInt64(batch[43:51], producerID)
-	putInt16(batch[51:53], producerEpoch)
-	putInt32(batch[53:57], baseSequence)
-	putInt32(batch[57:61], 1)
-	batch = append(batch, record...)
-
-	putInt32(batch[8:12], int32(len(batch)-12))
-	crc := crc32.Checksum(batch[21:], crc32.MakeTable(crc32.Castagnoli))
-	binary.BigEndian.PutUint32(batch[17:21], crc)
+	batch := protocol.BuildRecordBatch([]protocol.BatchRecord{{Value: []byte(value)}})
+	if producerID >= 0 {
+		putInt64(batch[43:51], producerID)
+		putInt16(batch[51:53], producerEpoch)
+		putInt32(batch[53:57], baseSequence)
+		crc := crc32.Checksum(batch[21:], crc32.MakeTable(crc32.Castagnoli))
+		binary.BigEndian.PutUint32(batch[17:21], crc)
+	}
 	return batch
 }
 
-func buildRecord(value string) []byte {
-	body := protocol.NewEncoder()
-	body.WriteInt8(0)
-	body.WriteVarint(0)
-	body.WriteVarint(0)
-	body.WriteVarint(-1)
-	body.WriteVarint(int32(len(value)))
-	recordBody := append(body.Bytes(), []byte(value)...)
-	trailer := protocol.NewEncoder()
-	trailer.WriteVarint(0)
-	recordBody = append(recordBody, trailer.Bytes()...)
-
-	record := protocol.NewEncoder()
-	record.WriteVarint(int32(len(recordBody)))
-	return append(record.Bytes(), recordBody...)
-}
-
 func decodeRecordSet(recordSet []byte) []string {
-	var values []string
-	reader := bytes.NewReader(recordSet)
-	for reader.Len() > 0 {
-		batchStart := int64(len(recordSet) - reader.Len())
-		dec := protocol.NewDecoder(reader)
-		mustReadInt64(dec, "base_offset")
-		batchLength := mustReadInt32(dec, "batch_length")
-		mustReadInt32(dec, "partition_leader_epoch")
-		magic := mustReadInt8(dec, "magic")
-		if magic != 2 {
-			log.Fatal("unexpected batch magic=" + strconv.Itoa(int(magic)))
-		}
-		mustReadInt32(dec, "crc")
-		mustReadInt16(dec, "attributes")
-		mustReadInt32(dec, "last_offset_delta")
-		mustReadInt64(dec, "base_timestamp")
-		mustReadInt64(dec, "max_timestamp")
-		mustReadInt64(dec, "producer_id")
-		mustReadInt16(dec, "producer_epoch")
-		mustReadInt32(dec, "base_sequence")
-		recordCount := mustReadInt32(dec, "record_count")
-		for i := 0; i < int(recordCount); i++ {
-			values = append(values, decodeRecordValue(reader, dec))
-		}
-		if _, err := reader.Seek(batchStart+12+int64(batchLength), io.SeekStart); err != nil {
-			log.Fatal(fmt.Errorf("seek next batch: %w", err))
-		}
+	records, err := protocol.DecodeRecordBatches(recordSet)
+	if err != nil {
+		log.Fatal(fmt.Errorf("decode record set: %w", err))
+	}
+	values := make([]string, len(records))
+	for i, r := range records {
+		values[i] = string(r.Value)
 	}
 	return values
-}
-
-func decodeRecordValue(reader *bytes.Reader, dec *protocol.Decoder) string {
-	mustReadVarint(dec, "record_length")
-	mustReadInt8(dec, "record_attributes")
-	mustReadVarint(dec, "timestamp_delta")
-	mustReadVarint(dec, "offset_delta")
-	keyLength := mustReadVarint(dec, "key_length")
-	if keyLength > 0 {
-		key := make([]byte, keyLength)
-		if _, err := io.ReadFull(reader, key); err != nil {
-			log.Fatal(fmt.Errorf("read key: %w", err))
-		}
-	}
-	valueLength := mustReadVarint(dec, "value_length")
-	value := make([]byte, valueLength)
-	if _, err := io.ReadFull(reader, value); err != nil {
-		log.Fatal(fmt.Errorf("read value: %w", err))
-	}
-	mustReadVarint(dec, "header_count")
-	return string(value)
-}
-
-func mustReadInt8(dec *protocol.Decoder, field string) int8 {
-	value, err := dec.ReadInt8()
-	if err != nil {
-		log.Fatal(fmt.Errorf("read %s: %w", field, err))
-	}
-	return value
 }
 
 func mustReadInt16(dec *protocol.Decoder, field string) int16 {
@@ -1673,22 +1598,6 @@ func mustReadInt16(dec *protocol.Decoder, field string) int16 {
 
 func mustReadInt32(dec *protocol.Decoder, field string) int32 {
 	value, err := dec.ReadInt32()
-	if err != nil {
-		log.Fatal(fmt.Errorf("read %s: %w", field, err))
-	}
-	return value
-}
-
-func mustReadInt64(dec *protocol.Decoder, field string) int64 {
-	value, err := dec.ReadInt64()
-	if err != nil {
-		log.Fatal(fmt.Errorf("read %s: %w", field, err))
-	}
-	return value
-}
-
-func mustReadVarint(dec *protocol.Decoder, field string) int32 {
-	value, err := dec.ReadVarint()
 	if err != nil {
 		log.Fatal(fmt.Errorf("read %s: %w", field, err))
 	}
