@@ -281,7 +281,7 @@
     <li class="done"><a href="#phase-25">Phase 25 — RecordBatch codec + produce/fetch API</a></li>
     <li class="done"><a href="#phase-26">Phase 26 — React dashboard + console</a></li>
     <li class="done"><a href="#phase-27">Phase 27 — Consumer-group + producer panels</a></li>
-    <li><a href="#phase-28">Phase 28 — Cluster view + failure injection</a></li>
+    <li class="done"><a href="#phase-28">Phase 28 — Cluster view + failure injection</a></li>
   </ul>
 </nav>
 
@@ -648,7 +648,7 @@
       </dl>
     </div>
 
-    <div class="phase" id="phase-28">
+    <div class="phase done" id="phase-28">
       <h3><span class="phase-id">Phase 28</span> Cluster view + failure injection</h3>
       <dl>
         <dt>Output</dt><dd>A <code>Faults</code> config type on the broker (slow-follower delay, drop controller heartbeats, pause), consulted by the Track D ReplicaFetcher loop and the Track E controller-heartbeat path; default zero value is a no-op. <code>GET /api/v1/cluster</code> (this broker's peer reachability + controller id), <code>GET</code>/<code>POST /api/v1/faults</code>, <code>POST /api/v1/shutdown</code> / <code>/pause</code> / <code>/resume</code>. React Cluster panel (all N brokers side by side, disagreement highlighting) and Chaos panel (fault toggles).</dd>

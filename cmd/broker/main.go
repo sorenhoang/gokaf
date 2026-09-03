@@ -8,11 +8,13 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"time"
 
 	"github.com/sorenhoang/gokaf/internal/cluster"
+	"github.com/sorenhoang/gokaf/internal/faults"
 	"github.com/sorenhoang/gokaf/internal/group"
 	"github.com/sorenhoang/gokaf/internal/httpapi"
 	"github.com/sorenhoang/gokaf/internal/network"
@@ -50,7 +52,9 @@ func main() {
 		Producers: producer.NewManager(),
 		Cluster:   membership,
 	}
+	broker.Faults = faults.New()
 	broker.Replication = replication.NewManager(nodeID, broker.Logs, membership, *replicaFetchInterval)
+	broker.Replication.UseFaults(broker.Faults)
 	defer broker.Replication.StopAll()
 	metadataLog, err := cluster.OpenMetadataLog(filepath.Join(*dataDir, "__cluster_metadata-0"))
 	if err != nil {
@@ -63,6 +67,12 @@ func main() {
 	monitor := cluster.NewLivenessMonitor(membership, nodeID, *pingInterval, 3, broker.OnPeerDown, broker.OnPeerUp)
 	broker.IsPeerAlive = monitor.Alive
 	broker.ControllerID = monitor.ControllerID
+	broker.Shutdown = func() {
+		log.Printf("broker %d: shutdown requested via admin API", nodeID)
+		cancelMonitor()
+		time.Sleep(100 * time.Millisecond)
+		os.Exit(0)
+	}
 	go monitor.Run(monitorContext)
 	offsetLog, err := broker.Logs.Log("__consumer_offsets", 0)
 	if err != nil {

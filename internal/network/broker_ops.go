@@ -216,6 +216,43 @@ func (b *Broker) ProducerInfos() []ProducerInfo {
 	return out
 }
 
+// --- cluster view ---
+
+type PeerReachability struct {
+	ID    int32 `json:"id"`
+	Alive bool  `json:"alive"`
+}
+
+type ClusterInfo struct {
+	Brokers      []BrokerInfo       `json:"brokers"`
+	ControllerID int32              `json:"controller_id"`
+	Self         int32              `json:"self"`
+	Peers        []PeerReachability `json:"peers"`
+}
+
+// ClusterInfo is this broker's own view of the cluster: the membership, who it
+// thinks the controller is, and which peers it can currently reach.
+func (b *Broker) ClusterInfo() ClusterInfo {
+	info := ClusterInfo{
+		Brokers:      []BrokerInfo{},
+		ControllerID: b.BrokerInfo().ControllerID,
+		Self:         b.NodeID,
+		Peers:        []PeerReachability{},
+	}
+	brokers := b.metadataBrokers()
+	for _, br := range brokers {
+		info.Brokers = append(info.Brokers, BrokerInfo{NodeID: br.ID, Host: br.Host, Port: br.Port, ControllerID: info.ControllerID})
+		alive := br.ID == b.NodeID
+		if !alive && b.IsPeerAlive != nil {
+			alive = b.IsPeerAlive(br.ID)
+		} else if !alive {
+			alive = true
+		}
+		info.Peers = append(info.Peers, PeerReachability{ID: br.ID, Alive: alive})
+	}
+	return info
+}
+
 func codeToError(code int16) error {
 	switch code {
 	case protocol.ErrNone:
@@ -280,11 +317,18 @@ func (b *Broker) TopicInfos() []TopicInfo {
 				}
 			}
 			highWatermark := endOffset
+			isr := append([]int32(nil), p.ISR...)
 			if b.Replication != nil {
 				highWatermark = b.Replication.HighWatermark(t.Name, p.ID, endOffset)
+				// When this broker leads the partition, prefer the live
+				// time-based ISR from replication state — that's what shrinks
+				// when a follower lags, before any failover touches the registry.
+				if live := b.Replication.ISR(t.Name, p.ID); len(live) > 0 {
+					isr = live
+				}
 			}
 			info.Partitions = append(info.Partitions, PartitionInfo{
-				ID: p.ID, Leader: p.Leader, Replicas: append([]int32(nil), p.Replicas...), ISR: append([]int32(nil), p.ISR...),
+				ID: p.ID, Leader: p.Leader, Replicas: append([]int32(nil), p.Replicas...), ISR: isr,
 				StartOffset: startOffset, EndOffset: endOffset, HighWatermark: highWatermark,
 			})
 		}

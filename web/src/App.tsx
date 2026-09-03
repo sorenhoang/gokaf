@@ -4,16 +4,19 @@ import {
   loadCluster,
   loadGroups,
   loadProducers,
+  loadClusterPanel,
   createTopic,
   produce,
   fetchRecords,
   resetGroupOffset,
+  setFaults,
+  shutdownBroker,
   type ClusterView,
   type FetchedRecord,
 } from "./api";
 import { BROKERS } from "./brokers";
 
-type Tab = "dashboard" | "groups" | "producers" | "console";
+type Tab = "dashboard" | "cluster" | "groups" | "producers" | "chaos" | "console";
 
 export function App() {
   const [tab, setTab] = useState<Tab>("dashboard");
@@ -25,7 +28,7 @@ export function App() {
       <header>
         <h1>gokaf</h1>
         <nav>
-          {(["dashboard", "groups", "producers", "console"] as Tab[]).map((t) => (
+          {(["dashboard", "cluster", "groups", "producers", "chaos", "console"] as Tab[]).map((t) => (
             <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>
               {t[0].toUpperCase() + t.slice(1)}
             </button>
@@ -48,9 +51,130 @@ export function App() {
       ))}
 
       {tab === "dashboard" && <Dashboard view={cluster.data} />}
+      {tab === "cluster" && <ClusterPanel />}
       {tab === "groups" && <GroupsPanel />}
       {tab === "producers" && <ProducersPanel />}
+      {tab === "chaos" && <ChaosPanel />}
       {tab === "console" && <Console topics={topics} onChange={cluster.refresh} />}
+    </div>
+  );
+}
+
+function ClusterPanel() {
+  const panel = usePoll(loadClusterPanel, 1000);
+  const rows = panel.data ?? [];
+  const controllers = new Set(rows.filter((r) => r.controllerId != null).map((r) => r.controllerId));
+
+  return (
+    <div className="pad">
+      <h2>Cluster — one column per broker's own view</h2>
+      {controllers.size > 1 && <div className="banner error">controller disagreement across brokers</div>}
+      <table>
+        <thead>
+          <tr>
+            <th>broker</th>
+            <th>reachable</th>
+            <th>thinks controller is</th>
+            <th>sees peers</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.base || "self"}>
+              <td>{r.base || "this broker"}</td>
+              <td>{r.error ? <span className="tag warn">unreachable</span> : "yes"}</td>
+              <td>{r.controllerId ?? "—"}</td>
+              <td>
+                {r.peers.map((p) => (
+                  <span key={p.id} className={p.alive ? "" : "tag warn"} style={{ marginRight: 8 }}>
+                    {p.id}
+                    {p.alive ? "" : " down"}
+                  </span>
+                ))}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ChaosPanel() {
+  const panel = usePoll(loadClusterPanel, 1000);
+  const rows = panel.data ?? [];
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const apply = async (base: string, body: Record<string, unknown>) => {
+    setMsg(null);
+    try {
+      await setFaults(base, body);
+      panel.refresh();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const kill = async (base: string) => {
+    setMsg(null);
+    try {
+      await shutdownBroker(base);
+      setMsg(`shutdown sent to ${base || "this broker"}`);
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  return (
+    <div className="pad">
+      <h2>Chaos</h2>
+      {msg && <p className="msg">{msg}</p>}
+      {BROKERS.length === 1 && (
+        <p className="muted">
+          add the other brokers to <code>src/brokers.ts</code> to inject faults across the cluster
+        </p>
+      )}
+      <div className="console">
+        {rows.map((r) => (
+          <div key={r.base || "self"} className="card">
+            <h3>{r.base || "this broker"}</h3>
+            {r.error ? (
+              <p className="muted">unreachable</p>
+            ) : (
+              <>
+                <label>
+                  slow follower delay (ms){" "}
+                  <input
+                    type="number"
+                    min={0}
+                    defaultValue={r.faults?.slow_follower_delay_ms ?? 0}
+                    onBlur={(e) => apply(r.base, { slow_follower_delay_ms: +e.target.value })}
+                  />
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={r.faults?.drop_pings ?? false}
+                    onChange={(e) => apply(r.base, { drop_pings: e.target.checked })}
+                  />{" "}
+                  drop liveness pings (looks dead to peers)
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={r.faults?.paused ?? false}
+                    onChange={(e) => apply(r.base, { paused: e.target.checked })}
+                  />{" "}
+                  pause replica fetch loop
+                </label>
+                <button type="button" onClick={() => kill(r.base)}>
+                  Shut down
+                </button>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

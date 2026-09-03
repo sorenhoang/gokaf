@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/sorenhoang/gokaf/internal/cluster"
+	"github.com/sorenhoang/gokaf/internal/faults"
 	"github.com/sorenhoang/gokaf/internal/storage"
 	"github.com/sorenhoang/gokaf/internal/topic"
 )
@@ -16,6 +17,7 @@ type Manager struct {
 	membership *cluster.Membership
 	interval   time.Duration
 	lagTimeout time.Duration
+	faults     *faults.Config
 	mu         sync.Mutex
 	fetchers   map[tp]context.CancelFunc
 	led        map[tp]*PartitionState
@@ -33,8 +35,16 @@ func NewManager(selfID int32, logs *storage.Manager, membership *cluster.Members
 		membership: membership,
 		interval:   interval,
 		lagTimeout: 10 * time.Second,
+		faults:     faults.New(),
 		fetchers:   map[tp]context.CancelFunc{},
 		led:        map[tp]*PartitionState{},
+	}
+}
+
+// UseFaults points the replica-fetch loop at a shared fault config.
+func (m *Manager) UseFaults(c *faults.Config) {
+	if c != nil {
+		m.faults = c
 	}
 }
 
@@ -84,6 +94,7 @@ func (m *Manager) StartFollowing(t topic.Topic) {
 			localLog:  localLog,
 			interval:  m.interval,
 			maxBytes:  1 << 20,
+			faults:    m.faults,
 		}
 		go f.run(ctx)
 	}

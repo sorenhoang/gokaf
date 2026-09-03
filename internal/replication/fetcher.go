@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sorenhoang/gokaf/internal/cluster"
+	"github.com/sorenhoang/gokaf/internal/faults"
 	"github.com/sorenhoang/gokaf/internal/protocol"
 	"github.com/sorenhoang/gokaf/internal/storage"
 )
@@ -20,6 +21,7 @@ type fetcher struct {
 	localLog  *storage.Log
 	interval  time.Duration
 	maxBytes  int32
+	faults    *faults.Config
 }
 
 func (f *fetcher) run(ctx context.Context) {
@@ -36,6 +38,12 @@ func (f *fetcher) run(ctx context.Context) {
 }
 
 func (f *fetcher) fetchOnce() {
+	if f.faults.Paused() {
+		return
+	}
+	if d := f.faults.SlowFollowerDelay(); d > 0 {
+		time.Sleep(d)
+	}
 	from := f.localLog.EndOffset()
 	body := buildFetchRequest(f.selfID, f.topic, f.partition, from, f.maxBytes)
 	resp, err := cluster.NewBrokerClient(f.leader).Send(protocol.RequestHeader{APIKey: 1, APIVersion: 0, CorrelationID: 1}, body)

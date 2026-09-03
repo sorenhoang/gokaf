@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/sorenhoang/gokaf/internal/network"
 	"github.com/sorenhoang/gokaf/internal/protocol"
@@ -139,10 +140,73 @@ func New(b *network.Broker) http.Handler {
 		})
 	})
 
+	mux.HandleFunc("GET /api/v1/cluster", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, b.ClusterInfo())
+	})
+
+	mux.HandleFunc("GET /api/v1/faults", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, b.Faults.Snapshot())
+	})
+
+	mux.HandleFunc("POST /api/v1/faults", func(w http.ResponseWriter, r *http.Request) {
+		if b.Faults == nil {
+			writeError(w, http.StatusServiceUnavailable, errNoFaults)
+			return
+		}
+		var req struct {
+			SlowFollowerDelayMS *int64 `json:"slow_follower_delay_ms"`
+			DropPings           *bool  `json:"drop_pings"`
+			Paused              *bool  `json:"paused"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		if req.SlowFollowerDelayMS != nil {
+			b.Faults.SetSlowFollowerDelay(time.Duration(*req.SlowFollowerDelayMS) * time.Millisecond)
+		}
+		if req.DropPings != nil {
+			b.Faults.SetDropPings(*req.DropPings)
+		}
+		if req.Paused != nil {
+			b.Faults.SetPaused(*req.Paused)
+		}
+		writeJSON(w, http.StatusOK, b.Faults.Snapshot())
+	})
+
+	mux.HandleFunc("POST /api/v1/pause", func(w http.ResponseWriter, r *http.Request) {
+		if b.Faults == nil {
+			writeError(w, http.StatusServiceUnavailable, errNoFaults)
+			return
+		}
+		b.Faults.SetPaused(true)
+		writeJSON(w, http.StatusOK, b.Faults.Snapshot())
+	})
+
+	mux.HandleFunc("POST /api/v1/resume", func(w http.ResponseWriter, r *http.Request) {
+		if b.Faults == nil {
+			writeError(w, http.StatusServiceUnavailable, errNoFaults)
+			return
+		}
+		b.Faults.SetPaused(false)
+		writeJSON(w, http.StatusOK, b.Faults.Snapshot())
+	})
+
+	mux.HandleFunc("POST /api/v1/shutdown", func(w http.ResponseWriter, r *http.Request) {
+		if b.Shutdown == nil {
+			writeError(w, http.StatusServiceUnavailable, errors.New("shutdown not wired"))
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "shutting down"})
+		go b.Shutdown()
+	})
+
 	mux.Handle("/", staticHandler())
 
 	return mux
 }
+
+var errNoFaults = errors.New("fault injection unavailable")
 
 func statusFor(err error) int {
 	switch {

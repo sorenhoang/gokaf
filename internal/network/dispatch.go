@@ -7,6 +7,7 @@ import (
 	"net"
 
 	"github.com/sorenhoang/gokaf/internal/cluster"
+	"github.com/sorenhoang/gokaf/internal/faults"
 	"github.com/sorenhoang/gokaf/internal/group"
 	"github.com/sorenhoang/gokaf/internal/offset"
 	"github.com/sorenhoang/gokaf/internal/producer"
@@ -55,6 +56,8 @@ type Broker struct {
 	IsPeerAlive  func(int32) bool
 	ControllerID func() int32
 	MetadataLog  *cluster.MetadataLog
+	Faults       *faults.Config
+	Shutdown     func()
 }
 
 func (b *Broker) Dispatch(conn net.Conn, payload []byte) error {

@@ -118,7 +118,7 @@ plan to be written when the track starts.
       AC: Run a simulated consumer group via testclient → UI shows members,
       assignments, lag updating. Reset a group offset from the UI → it
       re-consumes from there.
-- [ ] **Phase 28** — Cluster view + failure injection
+- [x] **Phase 28** — Cluster view + failure injection
       AC: From the UI only — slow a follower and watch it leave the ISR;
       kill the controller and watch a new one elected; kill a leader
       mid-produce and watch failover complete. No terminal involved.

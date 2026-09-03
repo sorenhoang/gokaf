@@ -188,3 +188,64 @@ export function resetGroupOffset(group: string, topic: string, partition: number
     body: JSON.stringify({ topic, partition, offset }),
   });
 }
+
+// --- cluster + chaos ---
+
+export interface PeerReachability {
+  id: number;
+  alive: boolean;
+}
+export interface ClusterInfoRaw {
+  brokers: BrokerInfo[];
+  controller_id: number;
+  self: number;
+  peers: PeerReachability[];
+}
+export interface Faults {
+  slow_follower_delay_ms: number;
+  drop_pings: boolean;
+  paused: boolean;
+}
+
+export interface PerBrokerCluster {
+  base: string;
+  self: number | null;
+  controllerId: number | null;
+  peers: PeerReachability[];
+  faults: Faults | null;
+  error: string | null;
+}
+
+export async function loadClusterPanel(): Promise<PerBrokerCluster[]> {
+  return Promise.all(
+    BROKERS.map(async (base): Promise<PerBrokerCluster> => {
+      try {
+        const info = await req<ClusterInfoRaw>(base, "/api/v1/cluster");
+        let faults: Faults | null = null;
+        try {
+          faults = await req<Faults>(base, "/api/v1/faults");
+        } catch {
+          /* faults optional */
+        }
+        return { base, self: info.self, controllerId: info.controller_id, peers: info.peers, faults, error: null };
+      } catch (e) {
+        return {
+          base,
+          self: null,
+          controllerId: null,
+          peers: [],
+          faults: null,
+          error: e instanceof Error ? e.message : String(e),
+        };
+      }
+    }),
+  );
+}
+
+export function setFaults(base: string, body: Partial<Faults>) {
+  return req<Faults>(base, "/api/v1/faults", { method: "POST", body: JSON.stringify(body) });
+}
+
+export function shutdownBroker(base: string) {
+  return req<unknown>(base, "/api/v1/shutdown", { method: "POST" });
+}
