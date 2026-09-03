@@ -929,53 +929,23 @@ func decodeSubscription(b []byte) []string {
 }
 
 func encodeAssignment(assignments []topicAssignment) []byte {
-	e := protocol.NewEncoder()
-	e.WriteInt16(0)
-	e.WriteArrayLen(len(assignments))
-	for _, assignment := range assignments {
-		e.WriteString(assignment.topic)
-		e.WriteArrayLen(len(assignment.partitions))
-		for _, partition := range assignment.partitions {
-			e.WriteInt32(partition)
-		}
+	tps := make([]assignor.TopicPartitions, len(assignments))
+	for i, a := range assignments {
+		tps[i] = assignor.TopicPartitions{Topic: a.topic, Partitions: a.partitions}
 	}
-	e.WriteInt32(-1)
-	return e.Bytes()
+	return assignor.EncodeAssignment(tps)
 }
 
 func decodeAssignment(b []byte) []topicAssignment {
-	dec := protocol.NewDecoder(bytes.NewReader(b))
-	if _, err := dec.ReadInt16(); err != nil {
-		log.Fatal(fmt.Errorf("read assignment version: %w", err))
-	}
-	assignmentCount, err := dec.ReadArrayLen()
+	tps, err := assignor.DecodeAssignment(b)
 	if err != nil {
-		log.Fatal(fmt.Errorf("read assignment count: %w", err))
+		log.Fatal(fmt.Errorf("decode assignment: %w", err))
 	}
-	assignments := make([]topicAssignment, 0, assignmentCount)
-	for i := 0; i < assignmentCount; i++ {
-		topicName, err := dec.ReadString()
-		if err != nil {
-			log.Fatal(fmt.Errorf("read assignment topic: %w", err))
-		}
-		partitionCount, err := dec.ReadArrayLen()
-		if err != nil {
-			log.Fatal(fmt.Errorf("read assignment partition count: %w", err))
-		}
-		partitions := make([]int32, 0, partitionCount)
-		for j := 0; j < partitionCount; j++ {
-			partition, err := dec.ReadInt32()
-			if err != nil {
-				log.Fatal(fmt.Errorf("read assignment partition: %w", err))
-			}
-			partitions = append(partitions, partition)
-		}
-		assignments = append(assignments, topicAssignment{topic: topicName, partitions: partitions})
+	out := make([]topicAssignment, len(tps))
+	for i, tp := range tps {
+		out[i] = topicAssignment{topic: tp.Topic, partitions: tp.Partitions}
 	}
-	if _, err := dec.ReadBytes(); err != nil {
-		log.Fatal(fmt.Errorf("read assignment user_data: %w", err))
-	}
-	return assignments
+	return out
 }
 
 func buildAssignments(members []joinGroupMember, protocolName string, partitionCounts map[string]int32) map[string][]byte {

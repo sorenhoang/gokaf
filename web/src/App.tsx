@@ -2,15 +2,18 @@ import { useState, type FormEvent } from "react";
 import { usePoll } from "./usePoll";
 import {
   loadCluster,
+  loadGroups,
+  loadProducers,
   createTopic,
   produce,
   fetchRecords,
+  resetGroupOffset,
   type ClusterView,
   type FetchedRecord,
 } from "./api";
 import { BROKERS } from "./brokers";
 
-type Tab = "dashboard" | "console";
+type Tab = "dashboard" | "groups" | "producers" | "console";
 
 export function App() {
   const [tab, setTab] = useState<Tab>("dashboard");
@@ -22,12 +25,11 @@ export function App() {
       <header>
         <h1>gokaf</h1>
         <nav>
-          <button className={tab === "dashboard" ? "active" : ""} onClick={() => setTab("dashboard")}>
-            Dashboard
-          </button>
-          <button className={tab === "console" ? "active" : ""} onClick={() => setTab("console")}>
-            Console
-          </button>
+          {(["dashboard", "groups", "producers", "console"] as Tab[]).map((t) => (
+            <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>
+              {t[0].toUpperCase() + t.slice(1)}
+            </button>
+          ))}
         </nav>
         <span className="controller">
           {cluster.data
@@ -45,11 +47,144 @@ export function App() {
         </div>
       ))}
 
-      {tab === "dashboard" ? (
-        <Dashboard view={cluster.data} />
-      ) : (
-        <Console topics={topics} onChange={cluster.refresh} />
-      )}
+      {tab === "dashboard" && <Dashboard view={cluster.data} />}
+      {tab === "groups" && <GroupsPanel />}
+      {tab === "producers" && <ProducersPanel />}
+      {tab === "console" && <Console topics={topics} onChange={cluster.refresh} />}
+    </div>
+  );
+}
+
+function GroupsPanel() {
+  const groups = usePoll(loadGroups, 1000);
+  const [reset, setReset] = useState({ group: "", topic: "", partition: 0, offset: 0 });
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setMsg(null);
+    try {
+      await resetGroupOffset(reset.group, reset.topic, reset.partition, reset.offset);
+      setMsg(`reset ${reset.group} ${reset.topic}-${reset.partition} to ${reset.offset}`);
+      groups.refresh();
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  return (
+    <div className="pad">
+      {groups.error && <div className="banner error">{groups.error}</div>}
+      <h2>Consumer groups</h2>
+      {(groups.data ?? []).length === 0 && <p className="muted">no active groups</p>}
+      {(groups.data ?? []).map((g) => (
+        <div key={g.id} className="topic">
+          <h3>
+            {g.id} <span className="muted">— {g.state}, gen {g.generation_id}, protocol {g.protocol || "?"}, leader {g.leader_id || "?"}</span>
+          </h3>
+          {(g.members ?? []).map((m) => (
+            <div key={m.id}>
+              <strong>{m.id}</strong>
+              {(m.assignment ?? []).length === 0 ? (
+                <span className="muted"> — no assignment</span>
+              ) : (
+                <table>
+                  <thead>
+                    <tr>
+                      <th>topic</th>
+                      <th>partition</th>
+                      <th>committed</th>
+                      <th>hwm</th>
+                      <th>lag</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(m.assignment ?? []).map((a) => (
+                      <tr key={`${a.topic}-${a.partition}`}>
+                        <td>{a.topic}</td>
+                        <td>{a.partition}</td>
+                        <td>{a.committed_offset < 0 ? "—" : a.committed_offset}</td>
+                        <td>{a.high_watermark}</td>
+                        <td>{a.lag}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          ))}
+        </div>
+      ))}
+
+      <form className="card" onSubmit={submit} style={{ maxWidth: 360 }}>
+        <h3>Reset committed offset</h3>
+        <label>
+          group{" "}
+          <input value={reset.group} onChange={(e) => setReset({ ...reset, group: e.target.value })} required />
+        </label>
+        <label>
+          topic{" "}
+          <input value={reset.topic} onChange={(e) => setReset({ ...reset, topic: e.target.value })} required />
+        </label>
+        <label>
+          partition{" "}
+          <input
+            type="number"
+            min={0}
+            value={reset.partition}
+            onChange={(e) => setReset({ ...reset, partition: +e.target.value })}
+          />
+        </label>
+        <label>
+          offset{" "}
+          <input
+            type="number"
+            min={0}
+            value={reset.offset}
+            onChange={(e) => setReset({ ...reset, offset: +e.target.value })}
+          />
+        </label>
+        <button type="submit">Reset</button>
+        {msg && <p className="msg">{msg}</p>}
+      </form>
+    </div>
+  );
+}
+
+function ProducersPanel() {
+  const producers = usePoll(loadProducers, 1000);
+  return (
+    <div className="pad">
+      {producers.error && <div className="banner error">{producers.error}</div>}
+      <h2>Idempotent producers</h2>
+      {(producers.data ?? []).length === 0 && <p className="muted">no active producer ids</p>}
+      {(producers.data ?? []).map((p) => (
+        <div key={p.producer_id} className="topic">
+          <h3>
+            pid {p.producer_id} <span className="muted">— epoch {p.epoch}</span>
+          </h3>
+          <table>
+            <thead>
+              <tr>
+                <th>topic</th>
+                <th>partition</th>
+                <th>last sequence</th>
+                <th>last offset</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(p.partitions ?? []).map((part) => (
+                <tr key={`${part.topic}-${part.partition}`}>
+                  <td>{part.topic}</td>
+                  <td>{part.partition}</td>
+                  <td>{part.last_sequence}</td>
+                  <td>{part.last_offset}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ))}
     </div>
   );
 }

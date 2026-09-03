@@ -140,3 +140,51 @@ export function fetchRecords(base: string, topic: string, partition: number, off
     body: JSON.stringify({ topic, partition, offset }),
   });
 }
+
+// --- groups + producers ---
+
+export interface GroupPartition {
+  topic: string;
+  partition: number;
+  committed_offset: number;
+  high_watermark: number;
+  lag: number;
+}
+export interface GroupMember {
+  id: string;
+  assignment: GroupPartition[];
+}
+export interface Group {
+  id: string;
+  state: string;
+  generation_id: number;
+  leader_id: string;
+  protocol: string;
+  members: GroupMember[];
+}
+export interface ProducerPartition {
+  topic: string;
+  partition: number;
+  last_sequence: number;
+  last_offset: number;
+}
+export interface Producer {
+  producer_id: number;
+  epoch: number;
+  partitions: ProducerPartition[];
+}
+
+export function loadGroups() {
+  return req<Group[]>(primary, "/api/v1/groups");
+}
+
+export function loadProducers() {
+  return req<Producer[]>(primary, "/api/v1/producers");
+}
+
+export function resetGroupOffset(group: string, topic: string, partition: number, offset: number) {
+  return req<unknown>(primary, `/api/v1/groups/${encodeURIComponent(group)}/reset-offset`, {
+    method: "POST",
+    body: JSON.stringify({ topic, partition, offset }),
+  });
+}

@@ -44,7 +44,7 @@ delegating it to Claude. Behave accordingly:
 
 ## Current status
 
-Phases 0–26 done. Next up: **Phase 27 — Consumer-group + producer panels** (Track F).
+Phases 0–27 done. Next up: **Phase 28 — Cluster view + failure injection** (Track F).
 
 Full checklist with acceptance criteria per phase: [PROGRESS.md](PROGRESS.md).
 Update both this line and the matching checkbox in PROGRESS.md as phases

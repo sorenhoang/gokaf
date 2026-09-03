@@ -114,7 +114,7 @@ plan to be written when the track starts.
 - [x] **Phase 26** — React dashboard + console
       AC: `npm run build && go run ./cmd/broker`, open `localhost:8080`,
       create a topic → produce → browse it back, entirely from the UI.
-- [ ] **Phase 27** — Consumer-group + producer panels
+- [x] **Phase 27** — Consumer-group + producer panels
       AC: Run a simulated consumer group via testclient → UI shows members,
       assignments, lag updating. Reset a group offset from the UI → it
       re-consumes from there.

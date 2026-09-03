@@ -149,3 +149,33 @@ func hasTopic(topics []network.TopicInfo, name string) bool {
 	}
 	return false
 }
+
+func TestGroupsAndProducersEndpointsReturnJSON(t *testing.T) {
+	h := New(newTestBroker(t))
+
+	rec := do(t, h, "GET", "/api/v1/groups", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("groups status = %d", rec.Code)
+	}
+	var groups []map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&groups); err != nil {
+		t.Fatalf("groups body: %v", err)
+	}
+
+	rec = do(t, h, "GET", "/api/v1/producers", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("producers status = %d", rec.Code)
+	}
+	var producers []map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&producers); err != nil {
+		t.Fatalf("producers body: %v", err)
+	}
+}
+
+func TestResetGroupOffsetWithoutStoreIs500(t *testing.T) {
+	h := New(newTestBroker(t)) // no Offsets store wired
+	rec := do(t, h, "POST", "/api/v1/groups/g1/reset-offset", map[string]any{"topic": "orders", "partition": 0, "offset": 5})
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+}

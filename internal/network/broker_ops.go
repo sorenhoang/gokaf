@@ -3,7 +3,9 @@ package network
 import (
 	"encoding/binary"
 	"errors"
+	"sort"
 
+	"github.com/sorenhoang/gokaf/internal/assignor"
 	"github.com/sorenhoang/gokaf/internal/protocol"
 	"github.com/sorenhoang/gokaf/internal/storage"
 	"github.com/sorenhoang/gokaf/internal/topic"
@@ -89,6 +91,129 @@ func (b *Broker) Fetch(topicName string, partition int32, offset int64, maxBytes
 		return nil, highWatermark, err
 	}
 	return records, highWatermark, nil
+}
+
+// --- consumer group + producer admin views ---
+
+type GroupPartitionInfo struct {
+	Topic           string `json:"topic"`
+	Partition       int32  `json:"partition"`
+	CommittedOffset int64  `json:"committed_offset"`
+	HighWatermark   int64  `json:"high_watermark"`
+	Lag             int64  `json:"lag"`
+}
+
+type GroupMemberInfo struct {
+	ID         string               `json:"id"`
+	Assignment []GroupPartitionInfo `json:"assignment"`
+}
+
+type GroupInfo struct {
+	ID           string            `json:"id"`
+	State        string            `json:"state"`
+	GenerationID int32             `json:"generation_id"`
+	LeaderID     string            `json:"leader_id"`
+	Protocol     string            `json:"protocol"`
+	Members      []GroupMemberInfo `json:"members"`
+}
+
+func (b *Broker) GroupInfos() []GroupInfo {
+	if b.Groups == nil {
+		return nil
+	}
+	snaps := b.Groups.Snapshot()
+	out := make([]GroupInfo, 0, len(snaps))
+	for _, g := range snaps {
+		info := GroupInfo{
+			ID: g.ID, State: g.State, GenerationID: g.GenerationID,
+			LeaderID: g.LeaderID, Protocol: g.Protocol, Members: []GroupMemberInfo{},
+		}
+		for _, m := range g.Members {
+			member := GroupMemberInfo{ID: m.ID, Assignment: []GroupPartitionInfo{}}
+			decoded, err := assignor.DecodeAssignment(m.Assignment)
+			if err == nil {
+				for _, tp := range decoded {
+					for _, p := range tp.Partitions {
+						member.Assignment = append(member.Assignment, b.groupPartitionInfo(g.ID, tp.Topic, p))
+					}
+				}
+			}
+			info.Members = append(info.Members, member)
+		}
+		out = append(out, info)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+func (b *Broker) groupPartitionInfo(groupID, topicName string, partition int32) GroupPartitionInfo {
+	committed := int64(-1)
+	if b.Offsets != nil {
+		committed = b.Offsets.Fetch(groupID, topicName, partition)
+	}
+	hwm := b.highWatermarkOf(topicName, partition)
+	from := committed
+	if from < 0 {
+		from = 0
+	}
+	lag := hwm - from
+	if lag < 0 {
+		lag = 0
+	}
+	return GroupPartitionInfo{Topic: topicName, Partition: partition, CommittedOffset: committed, HighWatermark: hwm, Lag: lag}
+}
+
+func (b *Broker) highWatermarkOf(topicName string, partition int32) int64 {
+	if b.Logs == nil {
+		return 0
+	}
+	partitionLog, err := b.Logs.Log(topicName, partition)
+	if err != nil {
+		return 0
+	}
+	end := partitionLog.EndOffset()
+	if b.Replication != nil {
+		return b.Replication.HighWatermark(topicName, partition, end)
+	}
+	return end
+}
+
+// ResetGroupOffset overwrites a group's committed offset for one partition.
+func (b *Broker) ResetGroupOffset(groupID, topicName string, partition int32, offset int64) error {
+	if b.Offsets == nil {
+		return errors.New("offset store unavailable")
+	}
+	return b.Offsets.Commit(groupID, topicName, partition, offset)
+}
+
+type ProducerPartitionInfo struct {
+	Topic        string `json:"topic"`
+	Partition    int32  `json:"partition"`
+	LastSequence int32  `json:"last_sequence"`
+	LastOffset   int64  `json:"last_offset"`
+}
+
+type ProducerInfo struct {
+	ProducerID int64                   `json:"producer_id"`
+	Epoch      int16                   `json:"epoch"`
+	Partitions []ProducerPartitionInfo `json:"partitions"`
+}
+
+func (b *Broker) ProducerInfos() []ProducerInfo {
+	if b.Producers == nil {
+		return nil
+	}
+	out := make([]ProducerInfo, 0)
+	for _, s := range b.Producers.Snapshot() {
+		info := ProducerInfo{ProducerID: s.ProducerID, Epoch: s.Epoch, Partitions: []ProducerPartitionInfo{}}
+		for _, p := range s.Partitions {
+			info.Partitions = append(info.Partitions, ProducerPartitionInfo{
+				Topic: p.Topic, Partition: p.Partition, LastSequence: p.LastSequence, LastOffset: p.LastOffset,
+			})
+		}
+		out = append(out, info)
+	}
+	return out
 }
 
 func codeToError(code int16) error {

@@ -112,6 +112,33 @@ func New(b *network.Broker) http.Handler {
 		writeJSON(w, http.StatusOK, map[string]any{"high_watermark": highWatermark, "records": out})
 	})
 
+	mux.HandleFunc("GET /api/v1/groups", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, b.GroupInfos())
+	})
+
+	mux.HandleFunc("GET /api/v1/producers", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, b.ProducerInfos())
+	})
+
+	mux.HandleFunc("POST /api/v1/groups/{id}/reset-offset", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Topic     string `json:"topic"`
+			Partition int32  `json:"partition"`
+			Offset    int64  `json:"offset"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		if err := b.ResetGroupOffset(r.PathValue("id"), req.Topic, req.Partition, req.Offset); err != nil {
+			writeError(w, statusFor(err), err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"group": r.PathValue("id"), "topic": req.Topic, "partition": req.Partition, "offset": req.Offset,
+		})
+	})
+
 	mux.Handle("/", staticHandler())
 
 	return mux
