@@ -35,6 +35,21 @@ func TestLivenessMonitorMarksPeerDownAfterConsecutiveMisses(t *testing.T) {
 	}
 }
 
+func TestLivenessMonitorControllerIDReturnsHighestLiveBroker(t *testing.T) {
+	membership, err := ParseMembership("1@localhost:19092,2@localhost:19093,3@localhost:19094", 1, "localhost", 19092)
+	if err != nil {
+		t.Fatalf("ParseMembership: %v", err)
+	}
+	lm := NewLivenessMonitor(membership, 1, time.Millisecond, 1, nil, nil)
+	if got := lm.ControllerID(); got != 3 {
+		t.Fatalf("initial controller: got %d, want 3", got)
+	}
+	lm.recordMiss(3)
+	if got := lm.ControllerID(); got != 2 {
+		t.Fatalf("controller after broker 3 down: got %d, want 2", got)
+	}
+}
+
 func unusedPort(t *testing.T) string {
 	t.Helper()
 

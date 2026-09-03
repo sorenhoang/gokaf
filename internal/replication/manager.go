@@ -44,11 +44,15 @@ func (m *Manager) StartFollowing(t topic.Topic) {
 			continue
 		}
 		key := tp{topic: t.Name, partition: partition.ID}
-		if partition.Replicas[0] == m.selfID {
+		if partition.Leader == m.selfID {
 			m.stopFollowingKey(key)
 			m.mu.Lock()
 			if _, ok := m.led[key]; !ok {
-				m.led[key] = NewPartitionState(partition.Replicas, m.selfID, m.lagTimeout)
+				replicas := partition.ISR
+				if len(replicas) == 0 {
+					replicas = partition.Replicas
+				}
+				m.led[key] = NewPartitionState(replicas, m.selfID, m.lagTimeout)
 			}
 			m.mu.Unlock()
 			continue

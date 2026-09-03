@@ -5,15 +5,21 @@ import (
 	"sort"
 )
 
-// OnPeerDown promotes this broker to leader of every partition whose leader
-// just died, when this broker is the lowest-id live ISR member.
+// OnPeerDown lets only the elected controller decide replacements for a dead
+// leader. All other brokers wait for the controller's ApplyTopic message.
 //
-// ponytail: "lowest live ISR wins" is a bully rule, not a real election. Two
-// brokers with divergent liveness views (a network partition) could both
-// promote the same partition — split brain. The test starts and kills whole
-// processes, so views stay consistent. Phase 22 replaces this with a single
-// elected controller that owns every leadership decision.
+// ponytail: the "controller = highest live broker id" election is derived from
+// ping-based liveness, not a quorum. Under a real network partition two sides
+// could each elect their own controller and both reassign the same partition —
+// split brain. The test kills whole processes so every broker sees the same
+// liveness, and a recovered highest-id broker silently reclaims controllership
+// (churn we accept). Phase 23's metadata log persists decisions but is still
+// not Raft; real safety needs real consensus.
 func (b *Broker) OnPeerDown(deadID int32) {
+	if b.controllerID() != b.NodeID {
+		return
+	}
+	log.Printf("controller %d reassigning partitions led by dead broker %d", b.NodeID, deadID)
 	for _, t := range b.Topics.All() {
 		changed := false
 		for i := range t.Partitions {
@@ -26,24 +32,22 @@ func (b *Broker) OnPeerDown(deadID int32) {
 				log.Printf("partition %s-%d unavailable: dead leader %d and empty live ISR", t.Name, partition.ID, deadID)
 				continue
 			}
-			newLeader := liveISR[0]
-			if newLeader != b.NodeID {
-				continue
-			}
-
-			partition.Leader = b.NodeID
+			partition.Leader = liveISR[0]
 			partition.ISR = liveISR
 			changed = true
-			if b.Replication != nil {
-				b.Replication.StopFollowing(t.Name, partition.ID)
-				b.Replication.Lead(t.Name, partition.ID, liveISR)
-			}
 		}
 		if changed {
-			b.Topics.Upsert(t)
+			b.applyTopic(t.Name, t.Partitions)
 			b.fanOutTopic(t.Name, t.Partitions)
 		}
 	}
+}
+
+func (b *Broker) controllerID() int32 {
+	if b.ControllerID != nil {
+		return b.ControllerID()
+	}
+	return b.NodeID
 }
 
 func (b *Broker) OnPeerUp(id int32) {

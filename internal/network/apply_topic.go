@@ -22,19 +22,22 @@ func (b *Broker) handleApplyTopic(header protocol.RequestHeader, body []byte) ([
 		return nil, err
 	}
 
-	// Upsert, not Create: a fan-out for a leader change lands on peers that
-	// already have the topic, and its partition list must be replaced.
-	b.Topics.Upsert(topic.Topic{Name: name, Partitions: partitions})
-	if b.Replication != nil {
-		for _, partition := range partitions {
-			b.Replication.StopFollowing(name, partition.ID)
-		}
-		b.Replication.StartFollowing(topic.Topic{Name: name, Partitions: partitions})
-	}
+	b.applyTopic(name, partitions)
 
 	e := protocol.NewEncoder()
 	writeTopicResults(e, []topicResult{{name: name, code: protocol.ErrNone}})
 	return e.Bytes(), nil
+}
+
+func (b *Broker) applyTopic(name string, partitions []topic.Partition) {
+	b.Topics.Upsert(topic.Topic{Name: name, Partitions: partitions})
+	if b.Replication == nil {
+		return
+	}
+	for _, partition := range partitions {
+		b.Replication.StopFollowing(name, partition.ID)
+	}
+	b.Replication.StartFollowing(topic.Topic{Name: name, Partitions: partitions})
 }
 
 func encodeApplyTopic(name string, partitions []topic.Partition) []byte {

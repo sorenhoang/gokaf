@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log"
 	"net"
 	"strconv"
 	"sync"
@@ -75,6 +76,19 @@ func (lm *LivenessMonitor) Alive(id int32) bool {
 	return lm.alive[id]
 }
 
+func (lm *LivenessMonitor) ControllerID() int32 {
+	lm.mu.RLock()
+	defer lm.mu.RUnlock()
+
+	controllerID := int32(-1)
+	for _, broker := range lm.membership.All() {
+		if lm.alive[broker.ID] && broker.ID > controllerID {
+			controllerID = broker.ID
+		}
+	}
+	return controllerID
+}
+
 func (lm *LivenessMonitor) checkPeers() {
 	for _, broker := range lm.membership.All() {
 		if broker.ID == lm.self {
@@ -131,6 +145,7 @@ func (lm *LivenessMonitor) recordMiss(id int32) {
 	lm.mu.Unlock()
 
 	if fireDown && lm.onDown != nil {
+		log.Printf("peer %d is down", id)
 		lm.onDown(id)
 	}
 }

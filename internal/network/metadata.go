@@ -44,6 +44,11 @@ func (b *Broker) handleMetadata(header protocol.RequestHeader, body []byte) ([]b
 		e.WriteString(broker.Host)
 		e.WriteInt32(broker.Port)
 	}
+	controllerID := b.NodeID
+	if b.ControllerID != nil {
+		controllerID = b.ControllerID()
+	}
+	e.WriteInt32(controllerID)
 
 	e.WriteArrayLen(len(topics) + len(unknownTopics))
 	for _, t := range topics {

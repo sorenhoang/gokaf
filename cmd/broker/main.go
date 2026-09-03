@@ -55,6 +55,7 @@ func main() {
 	defer cancelMonitor()
 	monitor := cluster.NewLivenessMonitor(membership, nodeID, *pingInterval, 3, broker.OnPeerDown, broker.OnPeerUp)
 	broker.IsPeerAlive = monitor.Alive
+	broker.ControllerID = monitor.ControllerID
 	go monitor.Run(monitorContext)
 	offsetLog, err := broker.Logs.Log("__consumer_offsets", 0)
 	if err != nil {

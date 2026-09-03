@@ -19,7 +19,7 @@ import (
 )
 
 func main() {
-	mode := flag.String("mode", "full", "test mode: full, produce-fetch, fetch-only, multi-partition, metadata-cluster, metadata-leaders, metadata-leaders-check, replica-sync, acks-all, find-coordinator, consumer-group, consumer-group-rebalance, consumer-group-roundrobin, offset-commit-fetch, offset-commit, offset-fetch, idempotent-producer, failover-produce, failover-verify")
+	mode := flag.String("mode", "full", "test mode: full, produce-fetch, fetch-only, multi-partition, metadata-cluster, metadata-leaders, metadata-leaders-check, replica-sync, acks-all, find-coordinator, consumer-group, consumer-group-rebalance, consumer-group-roundrobin, offset-commit-fetch, offset-commit, offset-fetch, idempotent-producer, failover-produce, failover-verify, controller-produce, controller-verify")
 	addr := flag.String("addr", "localhost:9092", "broker address")
 	topicFlag := flag.String("topic", "", "topic name for targeted test modes")
 	n := flag.Int("n", 10, "record count for targeted test modes")
@@ -92,6 +92,10 @@ func main() {
 		checkFailoverProduce(conn, *topicFlag)
 	case "failover-verify":
 		checkFailoverVerify(conn, *topicFlag)
+	case "controller-produce":
+		checkControllerProduce(conn, *topicFlag)
+	case "controller-verify":
+		checkControllerVerify(conn, *topicFlag)
 	default:
 		log.Fatal("unknown mode: " + *mode)
 	}
@@ -1661,7 +1665,7 @@ func checkMetadataCluster(conn net.Conn) {
 	if respHeader.CorrelationID != 177 {
 		log.Fatal("unexpected Metadata correlation_id=" + strconv.Itoa(int(respHeader.CorrelationID)))
 	}
-	brokers := readMetadataBrokers(dec)
+	brokers, _ := readMetadataHeader(dec)
 	want := []metadataBroker{
 		{id: 1, host: "localhost", port: 9092},
 		{id: 2, host: "localhost", port: 9093},
@@ -1779,6 +1783,76 @@ func checkFailoverVerify(conn net.Conn, topicName string) {
 	log.Printf("failover verified: topic=%s leader=%d records=10", topicName, leaderID)
 }
 
+func checkControllerProduce(conn net.Conn, topicName string) {
+	if topicName == "" {
+		log.Fatal("-topic is required for controller-produce")
+	}
+	checkCreateTopicWithReplicationFactor(conn, topicName, 3, 3, 280, 0)
+
+	// Partition 2 is led by broker 3 (the controller). Produce must go to the
+	// leader, so look it up from Metadata rather than assume this connection.
+	_, leaders, brokers := fetchMetadataTopicLeaders(conn, topicName, 281)
+	if leaders[2] != 3 {
+		log.Fatal("expected partition 2 to be led by broker 3, got " + strconv.Itoa(int(leaders[2])))
+	}
+	leader, ok := findMetadataBroker(brokers, leaders[2])
+	if !ok {
+		log.Fatal("partition 2 leader missing from Metadata broker list")
+	}
+	leaderConn, err := net.Dial("tcp", net.JoinHostPort(leader.host, strconv.Itoa(int(leader.port))))
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer leaderConn.Close()
+
+	batch := buildRecordBatch("before-controller-fail", -1, -1, -1)
+	offset, errorCode := produceRawBatchWithAcks(leaderConn, topicName, 2, batch, 282, -1, 10000)
+	if errorCode != protocol.ErrNone || offset != 0 {
+		log.Fatal("unexpected controller seed Produce response")
+	}
+	log.Printf("controller seed complete: topic=%s partition=2 records=1", topicName)
+}
+
+func checkControllerVerify(conn net.Conn, topicName string) {
+	if topicName == "" {
+		log.Fatal("-topic is required for controller-verify")
+	}
+	controllerID, leaders, brokers := fetchMetadataTopicLeaders(conn, topicName, 282)
+	if controllerID != 2 {
+		log.Fatal("unexpected controller from broker 1: got " + strconv.Itoa(int(controllerID)) + ", want 2")
+	}
+	secondControllerConn, err := net.Dial("tcp", "localhost:9093")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer secondControllerConn.Close()
+	controllerID, _, _ = fetchMetadataTopicLeaders(secondControllerConn, topicName, 283)
+	if controllerID != 2 {
+		log.Fatal("unexpected controller from broker 2: got " + strconv.Itoa(int(controllerID)) + ", want 2")
+	}
+	for partition, leaderID := range leaders {
+		if leaderID == 3 {
+			log.Fatal("partition still led by dead controller: partition=" + strconv.Itoa(int(partition)))
+		}
+	}
+	leader, ok := findMetadataBroker(brokers, leaders[2])
+	if !ok {
+		log.Fatal("partition 2 leader is missing from Metadata broker list")
+	}
+	leaderConn, err := net.Dial("tcp", net.JoinHostPort(leader.host, strconv.Itoa(int(leader.port))))
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer leaderConn.Close()
+	batch := buildRecordBatch("after-controller-fail", -1, -1, -1)
+	offset, errorCode := produceRawBatchWithAcks(leaderConn, topicName, 2, batch, 284, -1, 10000)
+	if errorCode != protocol.ErrNone || offset != 1 {
+		log.Fatal("unexpected post-controller Produce response")
+	}
+	checkFetchFromPartition(leaderConn, topicName, 2, 0, 285, 2, []string{"before-controller-fail", "after-controller-fail"})
+	log.Printf("controller election verified: topic=%s controller=%d leaders=%v", topicName, controllerID, leaders)
+}
+
 func waitForReplicaFetch(addr string, topicName string, wantHighWatermark int64, wantValues []string) {
 	deadline := time.Now().Add(5 * time.Second)
 	var lastHighWatermark int64
@@ -1845,7 +1919,7 @@ func checkMetadataTopic(conn net.Conn, wantName string, wantPresent bool, wantPa
 		log.Fatal("unexpected Metadata correlation_id=" + strconv.Itoa(int(respHeader.CorrelationID)))
 	}
 
-	brokers := readMetadataBrokers(dec)
+	brokers, _ := readMetadataHeader(dec)
 	if len(brokers) < 1 {
 		log.Fatal("unexpected Metadata broker count=0")
 	}
@@ -1950,7 +2024,7 @@ func fetchMetadataLeaderCounts(conn net.Conn, topicName string, correlationID in
 	if respHeader.CorrelationID != correlationID {
 		log.Fatal("unexpected Metadata correlation_id=" + strconv.Itoa(int(respHeader.CorrelationID)))
 	}
-	brokers := readMetadataBrokers(dec)
+	brokers, _ := readMetadataHeader(dec)
 	if !equalMetadataBrokers(brokers, []metadataBroker{{id: 1, host: "localhost", port: 9092}, {id: 2, host: "localhost", port: 9093}, {id: 3, host: "localhost", port: 9094}}) {
 		log.Fatal("unexpected Metadata brokers for leader check")
 	}
@@ -2037,7 +2111,7 @@ func fetchMetadataPartitionLeader(conn net.Conn, topicName string, correlationID
 	if respHeader.CorrelationID != correlationID {
 		log.Fatal("unexpected Metadata correlation_id=" + strconv.Itoa(int(respHeader.CorrelationID)))
 	}
-	brokers := readMetadataBrokers(dec)
+	brokers, _ := readMetadataHeader(dec)
 	topicCount, err := dec.ReadArrayLen()
 	if err != nil {
 		log.Fatal(fmt.Errorf("read topic count: %w", err))
@@ -2062,6 +2136,54 @@ func fetchMetadataPartitionLeader(conn net.Conn, topicName string, correlationID
 	}
 	log.Fatal("Metadata response did not include expected topic " + topicName)
 	return 0, nil
+}
+
+func fetchMetadataTopicLeaders(conn net.Conn, topicName string, correlationID int32) (int32, map[int32]int32, []metadataBroker) {
+	header := protocol.RequestHeader{APIKey: 3, APIVersion: 0, CorrelationID: correlationID}
+	e := protocol.NewEncoder()
+	protocol.WriteRequestHeader(e, header)
+	e.WriteArrayLen(0)
+	if err := network.WriteFrame(conn, e.Bytes()); err != nil {
+		log.Fatal(err)
+	}
+	respPayload, err := network.ReadFrame(conn)
+	if err != nil {
+		log.Fatal(err)
+	}
+	dec := protocol.NewDecoder(bytes.NewReader(respPayload))
+	respHeader, err := protocol.ReadResponseHeader(dec)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if respHeader.CorrelationID != correlationID {
+		log.Fatal("unexpected Metadata correlation_id=" + strconv.Itoa(int(respHeader.CorrelationID)))
+	}
+	brokers, controllerID := readMetadataHeader(dec)
+	topicCount := mustReadArrayLen(dec, "topic count")
+	for i := 0; i < topicCount; i++ {
+		topicErrorCode := mustReadInt16(dec, "topic error_code")
+		name, err := dec.ReadString()
+		if err != nil {
+			log.Fatal(fmt.Errorf("read topic name: %w", err))
+		}
+		partitionCount := mustReadArrayLen(dec, "partition count")
+		leaders := make(map[int32]int32)
+		for j := 0; j < partitionCount; j++ {
+			partitionErrorCode := mustReadInt16(dec, "partition error_code")
+			partitionID := mustReadInt32(dec, "partition index")
+			leaderID := mustReadInt32(dec, "partition leader_id")
+			drainMetadataIDs(dec, "replica")
+			drainMetadataIDs(dec, "isr")
+			if topicErrorCode == 0 && partitionErrorCode == 0 && name == topicName {
+				leaders[partitionID] = leaderID
+			}
+		}
+		if topicErrorCode == 0 && name == topicName {
+			return controllerID, leaders, brokers
+		}
+	}
+	log.Fatal("Metadata response did not include expected topic " + topicName)
+	return 0, nil, nil
 }
 
 func findMetadataBroker(brokers []metadataBroker, id int32) (metadataBroker, bool) {
@@ -2134,6 +2256,15 @@ func readMetadataBrokers(dec *protocol.Decoder) []metadataBroker {
 		brokers = append(brokers, metadataBroker{id: nodeID, host: host, port: port})
 	}
 	return brokers
+}
+
+func readMetadataHeader(dec *protocol.Decoder) ([]metadataBroker, int32) {
+	brokers := readMetadataBrokers(dec)
+	controllerID, err := dec.ReadInt32()
+	if err != nil {
+		log.Fatal(fmt.Errorf("read controller_id: %w", err))
+	}
+	return brokers, controllerID
 }
 
 func equalMetadataBrokers(a []metadataBroker, b []metadataBroker) bool {

@@ -44,7 +44,7 @@ delegating it to Claude. Behave accordingly:
 
 ## Current status
 
-Phases 0–21 done. Next up: **Phase 22 — Controller election** (Track E).
+Phases 0–22 done. Next up: **Phase 23 — Cluster metadata log** (Track E).
 
 Full checklist with acceptance criteria per phase: [PROGRESS.md](PROGRESS.md).
 Update both this line and the matching checkbox in PROGRESS.md as phases

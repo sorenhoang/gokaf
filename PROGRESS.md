@@ -90,7 +90,7 @@ not "done." Update this file as phases complete; keep `CLAUDE.md`'s
 
 ## Track E — Controller / Cluster Metadata (Phases 22–23)
 
-- [ ] **Phase 22** — Controller election
+- [x] **Phase 22** — Controller election
       AC: Kill the current controller → the cluster elects exactly one new
       controller within a few seconds, with no split-brain, under the
       simplifying assumption that there's no network partition in the test.

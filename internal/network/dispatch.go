@@ -41,17 +41,18 @@ var dispatchTable = map[int16]handlerFunc{
 }
 
 type Broker struct {
-	NodeID      int32
-	Host        string
-	Port        int32
-	Topics      *topic.Registry
-	Logs        *storage.Manager
-	Groups      *group.Coordinator
-	Offsets     *offset.Store
-	Producers   *producer.Manager
-	Cluster     *cluster.Membership
-	Replication *replication.Manager
-	IsPeerAlive func(int32) bool
+	NodeID       int32
+	Host         string
+	Port         int32
+	Topics       *topic.Registry
+	Logs         *storage.Manager
+	Groups       *group.Coordinator
+	Offsets      *offset.Store
+	Producers    *producer.Manager
+	Cluster      *cluster.Membership
+	Replication  *replication.Manager
+	IsPeerAlive  func(int32) bool
+	ControllerID func() int32
 }
 
 func (b *Broker) Dispatch(conn net.Conn, payload []byte) error {

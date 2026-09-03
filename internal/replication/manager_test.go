@@ -14,6 +14,7 @@ import (
 	"github.com/sorenhoang/gokaf/internal/cluster"
 	"github.com/sorenhoang/gokaf/internal/protocol"
 	"github.com/sorenhoang/gokaf/internal/storage"
+	"github.com/sorenhoang/gokaf/internal/topic"
 )
 
 func TestSplitBatchesReturnsEachRecordBatch(t *testing.T) {
@@ -124,6 +125,22 @@ func TestManagerLeadCreatesPartitionState(t *testing.T) {
 
 	if got := manager.ISR("orders", 0); !reflect.DeepEqual(got, []int32{2, 3}) {
 		t.Fatalf("ISR = %v, want [2 3]", got)
+	}
+}
+
+func TestManagerUsesPartitionLeaderInsteadOfPreferredReplica(t *testing.T) {
+	membership, err := cluster.ParseMembership("1@localhost:19092,2@localhost:19093,3@localhost:19094", 2, "localhost", 19093)
+	if err != nil {
+		t.Fatalf("ParseMembership: %v", err)
+	}
+	manager := NewManager(2, storage.NewManager(t.TempDir()), membership, time.Second)
+	manager.StartFollowing(topic.Topic{
+		Name:       "orders",
+		Partitions: []topic.Partition{{ID: 0, Leader: 2, Replicas: []int32{1, 2, 3}, ISR: []int32{2, 3}}},
+	})
+
+	if got := manager.ISR("orders", 0); !reflect.DeepEqual(got, []int32{2, 3}) {
+		t.Fatalf("leader state was not created for partition leader: got ISR %v", got)
 	}
 }
 

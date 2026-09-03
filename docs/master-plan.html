@@ -585,7 +585,7 @@
     </div>
     <p class="track-note">A deliberately simplified take on what KRaft does for real. Treat these two phases as "learn the shape of the idea," not "ship a production consensus system."</p>
 
-    <div class="phase" id="phase-22">
+    <div class="phase done" id="phase-22">
       <h3><span class="phase-id">Phase 22</span> Controller election</h3>
       <dl>
         <dt>Output</dt><dd>One broker in the cluster is elected "controller" and becomes solely responsible for deciding partition leadership, replacing the ad-hoc rule from Phase 21. Simplified via a bully algorithm (highest broker ID still alive wins) instead of real Raft.</dd>

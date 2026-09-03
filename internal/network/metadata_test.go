@@ -52,6 +52,13 @@ func TestHandleMetadataAllTopicsWritesBrokerTopicsAndPartitionLeaders(t *testing
 	if nodeID != 1 || host != "localhost" || port != 9092 {
 		t.Fatalf("broker: got {%d, %q, %d}, want {1, %q, 9092}", nodeID, host, port, "localhost")
 	}
+	controllerID, err := dec.ReadInt32()
+	if err != nil {
+		t.Fatalf("ReadInt32 controller id: unexpected error: %v", err)
+	}
+	if controllerID != 1 {
+		t.Fatalf("controller id: got %d, want 1", controllerID)
+	}
 
 	topicCount, err := dec.ReadArrayLen()
 	if err != nil {
@@ -148,6 +155,13 @@ func TestHandleMetadataWritesAllClusterBrokers(t *testing.T) {
 			t.Fatalf("broker[%d]: got %#v, want %#v", i, got[i], want[i])
 		}
 	}
+	controllerID, err := dec.ReadInt32()
+	if err != nil {
+		t.Fatalf("ReadInt32 controller id: unexpected error: %v", err)
+	}
+	if controllerID != 2 {
+		t.Fatalf("controller id: got %d, want 2", controllerID)
+	}
 }
 
 func TestHandleMetadataUnknownTopicReturnsErrorCode3(t *testing.T) {
@@ -194,6 +208,9 @@ func skipMetadataBrokers(t *testing.T, dec *protocol.Decoder) {
 	t.Helper()
 
 	_ = readMetadataBrokers(t, dec)
+	if _, err := dec.ReadInt32(); err != nil {
+		t.Fatalf("ReadInt32 controller id: unexpected error: %v", err)
+	}
 }
 
 func readMetadataBrokers(t *testing.T, dec *protocol.Decoder) []cluster.Broker {
