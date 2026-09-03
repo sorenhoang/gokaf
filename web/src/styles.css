@@ -1,0 +1,159 @@
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  color: #1a1a1a;
+  background: #f6f7f9;
+}
+.app {
+  max-width: 1100px;
+  margin: 0 auto;
+}
+header {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 14px 20px;
+  background: #1c1e26;
+  color: #fff;
+}
+header h1 {
+  margin: 0;
+  font-size: 18px;
+  letter-spacing: 0.5px;
+}
+header nav {
+  display: flex;
+  gap: 6px;
+}
+header nav button {
+  background: transparent;
+  color: #cfd2dc;
+  border: 1px solid #3a3d49;
+  border-radius: 6px;
+  padding: 5px 12px;
+  cursor: pointer;
+}
+header nav button.active {
+  background: #4f7cff;
+  border-color: #4f7cff;
+  color: #fff;
+}
+header .controller {
+  margin-left: auto;
+  font-size: 12px;
+  color: #9aa1b1;
+}
+.banner {
+  padding: 8px 20px;
+  font-size: 13px;
+}
+.banner.error {
+  background: #fde8e8;
+  color: #a12626;
+}
+.banner.warn {
+  background: #fff4e0;
+  color: #8a5a10;
+}
+.pad {
+  padding: 20px;
+}
+.muted {
+  color: #8a8f9c;
+}
+h2 {
+  font-size: 15px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #6b7280;
+  margin: 24px 0 8px;
+}
+table {
+  border-collapse: collapse;
+  width: 100%;
+  background: #fff;
+  border: 1px solid #e3e5ea;
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+th,
+td {
+  text-align: left;
+  padding: 7px 12px;
+  border-bottom: 1px solid #eef0f3;
+  font-variant-numeric: tabular-nums;
+}
+th {
+  background: #fafbfc;
+  font-weight: 600;
+  color: #4b5563;
+}
+tr:last-child td {
+  border-bottom: none;
+}
+.topic h3 {
+  margin: 16px 0 6px;
+  font-size: 14px;
+}
+.tag {
+  margin-left: 8px;
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 999px;
+}
+.tag.warn {
+  background: #fff4e0;
+  color: #8a5a10;
+}
+.console {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  align-items: start;
+}
+.card {
+  background: #fff;
+  border: 1px solid #e3e5ea;
+  border-radius: 10px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.card h3 {
+  margin: 0 0 4px;
+  font-size: 14px;
+}
+.card label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  color: #6b7280;
+}
+.card input,
+.card select {
+  padding: 6px 8px;
+  border: 1px solid #d6d9df;
+  border-radius: 6px;
+  font: inherit;
+}
+.card button {
+  align-self: flex-start;
+  margin-top: 4px;
+  background: #4f7cff;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 7px 16px;
+  cursor: pointer;
+}
+.card .msg {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #374151;
+}

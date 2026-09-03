@@ -44,7 +44,7 @@ delegating it to Claude. Behave accordingly:
 
 ## Current status
 
-Phases 0–25 done. Next up: **Phase 26 — React dashboard + console** (Track F).
+Phases 0–26 done. Next up: **Phase 27 — Consumer-group + producer panels** (Track F).
 
 Full checklist with acceptance criteria per phase: [PROGRESS.md](PROGRESS.md).
 Update both this line and the matching checkbox in PROGRESS.md as phases

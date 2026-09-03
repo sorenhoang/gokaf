@@ -279,7 +279,7 @@
   <ul>
     <li><a href="#phase-24">Phase 24 — Ops layer + HTTP skeleton</a></li>
     <li class="done"><a href="#phase-25">Phase 25 — RecordBatch codec + produce/fetch API</a></li>
-    <li><a href="#phase-26">Phase 26 — React dashboard + console</a></li>
+    <li class="done"><a href="#phase-26">Phase 26 — React dashboard + console</a></li>
     <li><a href="#phase-27">Phase 27 — Consumer-group + producer panels</a></li>
     <li><a href="#phase-28">Phase 28 — Cluster view + failure injection</a></li>
   </ul>
@@ -632,7 +632,7 @@
       </dl>
     </div>
 
-    <div class="phase" id="phase-26">
+    <div class="phase done" id="phase-26">
       <h3><span class="phase-id">Phase 26</span> React dashboard + console</h3>
       <dl>
         <dt>Output</dt><dd><code>web/</code> — Vite + React + TypeScript, no state-management library (a 1s polling hook + <code>useState</code>). Built <code>web/dist</code> embedded via <code>go:embed</code> and served by the broker at <code>/</code>; Vite dev server proxies <code>/api</code> in development. Dashboard: topics table with per-partition leader / replicas / ISR / start & end offset / high watermark / segment count / size. Console: create-topic form, produce form, fetch/browse view. Multi-broker: a static <code>brokers.ts</code> endpoint list; every view fetches from all brokers and merges, flagging disagreements.</dd>

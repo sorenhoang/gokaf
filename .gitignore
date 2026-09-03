@@ -40,3 +40,4 @@ go.work.sum
 
 # Serena MCP local tool state
 .serena/
+web/node_modules/

@@ -112,6 +112,8 @@ func New(b *network.Broker) http.Handler {
 		writeJSON(w, http.StatusOK, map[string]any{"high_watermark": highWatermark, "records": out})
 	})
 
+	mux.Handle("/", staticHandler())
+
 	return mux
 }
 

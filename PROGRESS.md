@@ -111,7 +111,7 @@ plan to be written when the track starts.
 - [x] **Phase 25** — Shared RecordBatch codec + produce/fetch API
       AC: Produce a keyed message via `curl`, fetch it back via `curl` →
       decoded key/value match, on-disk bytes identical to a wire Produce.
-- [ ] **Phase 26** — React dashboard + console
+- [x] **Phase 26** — React dashboard + console
       AC: `npm run build && go run ./cmd/broker`, open `localhost:8080`,
       create a topic → produce → browse it back, entirely from the UI.
 - [ ] **Phase 27** — Consumer-group + producer panels
