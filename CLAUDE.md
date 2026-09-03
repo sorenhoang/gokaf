@@ -44,7 +44,7 @@ delegating it to Claude. Behave accordingly:
 
 ## Current status
 
-Phases 0–23 done. Next up: **Phase 24 — Broker operations layer + HTTP skeleton** (Track F).
+Phases 0–24 done. Next up: **Phase 25 — Shared RecordBatch codec + produce/fetch API** (Track F).
 
 Full checklist with acceptance criteria per phase: [PROGRESS.md](PROGRESS.md).
 Update both this line and the matching checkbox in PROGRESS.md as phases

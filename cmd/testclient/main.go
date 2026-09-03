@@ -1981,8 +1981,17 @@ func checkCreateTopicViaController(conn net.Conn, topicName string, partitions i
 	if topicName == "" {
 		log.Fatal("-topic is required for create-topic")
 	}
-	// checkCreateTopicWithReplicationFactor already routes to the controller.
-	checkCreateTopicWithReplicationFactor(conn, topicName, partitions, 3, 287, 0)
+	controllerID, brokers := fetchMetadataController(conn, 286)
+	controller, ok := findMetadataBroker(brokers, controllerID)
+	if !ok {
+		log.Fatal("controller is missing from Metadata broker list")
+	}
+	target, err := net.Dial("tcp", net.JoinHostPort(controller.host, strconv.Itoa(int(controller.port))))
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer target.Close()
+	checkCreateTopicWithReplicationFactor(target, topicName, partitions, int16(len(brokers)), 287, 0)
 }
 
 func fetchMetadataController(conn net.Conn, correlationID int32) (int32, []metadataBroker) {

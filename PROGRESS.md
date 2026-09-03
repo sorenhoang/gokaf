@@ -104,7 +104,7 @@ React state-inspector + test console over an HTTP/JSON admin API built into
 the broker. Built last, against a finished broker. Full spec + implementation
 plan to be written when the track starts.
 
-- [ ] **Phase 24** — Broker operations layer + HTTP skeleton
+- [x] **Phase 24** — Broker operations layer + HTTP skeleton
       AC: `curl localhost:8080/api/v1/topics` returns the correct
       topic/partition/offset list as JSON; every existing Kafka wire test
       still passes unchanged.

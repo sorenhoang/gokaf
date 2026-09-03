@@ -7,12 +7,14 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/http"
 	"path/filepath"
 	"strconv"
 	"time"
 
 	"github.com/sorenhoang/gokaf/internal/cluster"
 	"github.com/sorenhoang/gokaf/internal/group"
+	"github.com/sorenhoang/gokaf/internal/httpapi"
 	"github.com/sorenhoang/gokaf/internal/network"
 	"github.com/sorenhoang/gokaf/internal/offset"
 	"github.com/sorenhoang/gokaf/internal/producer"
@@ -28,6 +30,7 @@ func main() {
 	replicaFetchInterval := flag.Duration("replica-fetch-interval", 200*time.Millisecond, "interval between follower replica fetches")
 	pingInterval := flag.Duration("ping-interval", 500*time.Millisecond, "interval between peer liveness pings")
 	dataDir := flag.String("data", "./data", "directory for partition log segments")
+	httpAddr := flag.String("http-addr", "", "HTTP admin API address, e.g. :8080 (empty = disabled)")
 	flag.Parse()
 
 	nodeID := int32(*id)
@@ -82,6 +85,15 @@ func main() {
 	}
 	metadataFollower := cluster.NewMetadataFollower(metadataLog, membership, nodeID, monitor.ControllerID, broker.ApplyMetadataRecord, 200*time.Millisecond)
 	go metadataFollower.Run(monitorContext)
+	if *httpAddr != "" {
+		httpServer := &http.Server{Addr: *httpAddr, Handler: httpapi.New(broker)}
+		go func() {
+			if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Printf("http server: %v", err)
+			}
+		}()
+		defer httpServer.Shutdown(context.Background())
+	}
 
 	listener, err := net.Listen("tcp", ":"+strconv.Itoa(*port))
 	if err != nil {
